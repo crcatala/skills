@@ -12,7 +12,7 @@ Use this skill after screenshots have been created locally (for example, during 
 
 Open each screenshot once and check it before uploading — never attach a capture sight unseen. In particular:
 
-- **Full-page captures:** `loading="lazy"` images below the fold render as blank areas unless the page was scrolled through before capturing. If the screenshot came from `agent-browser screenshot --full`, follow the scroll-through-then-capture recipe in the `agent-browser` skill (scroll the full page in increments, return to top, then capture).
+- **Full-page captures:** `loading="lazy"` images below the fold render as blank areas unless the page was scrolled through before capturing. If the screenshot came from a browser tool's full-page capture, scroll the full page in increments first, return to top, then capture.
 - Confirm the intended page state (logged in vs. out, correct view/tab, no stray modals, tooltips, or hover highlights).
 
 ## Upload

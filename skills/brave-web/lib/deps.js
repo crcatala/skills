@@ -21,7 +21,7 @@ import { execSync, spawnSync } from 'child_process';
  * 
  * @example
  * // At the top of your skill script:
- * import { ensureDeps } from '../shared/deps.js';
+ * import { ensureDeps } from './lib/deps.js';
  * ensureDeps(import.meta.dirname);
  */
 export function ensureDeps(skillDir) {
