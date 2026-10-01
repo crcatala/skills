@@ -47,9 +47,10 @@ Type "./my-cli --help"
 Enter
 Wait+Screen /Usage:/
 Screenshot /tmp/my-cli-help.png
+Sleep 500ms
 ```
 
-Replace the command and wait expression with ones that match the project. `Screenshot` captures the current terminal frame as PNG. If the target is a TUI, launch it, script the necessary key presses, wait for the target state, then screenshot that state.
+Replace the command and wait expression with ones that match the project. `Screenshot` marks the next recorded frame to be saved as PNG, and VHS stops recording as soon as the last command finishes, so end the tape with a short `Sleep` after it or the PNG may never be written (silently). If the target is a TUI, launch it, script the necessary key presses, wait for the target state, then screenshot that state.
 
 ### Short interaction recording
 
@@ -82,4 +83,4 @@ Choose an output extension supported by VHS for the requested format. Keep recor
 - VHS supports scripted typing and keys (`Type`, `Enter`, arrows, `Tab`, `Ctrl+…`), waits, sleeps, `Hide`/`Show`, screenshots, and multiple output formats. See the [official tape command reference](https://github.com/charmbracelet/vhs#vhs-command-reference) when a command or setting is unclear.
 - Avoid timing-only tapes where an output-ready signal exists. Fixed delays can be flaky on slower machines; use bounded `Wait` patterns for stable visible text where possible.
 - Don't include secrets in tape source, command arguments, environment values, or captures. Use redacted fixtures and hide setup from recordings when appropriate.
-- VHS can render PNG screenshots and GIF/MP4/WebM recordings; it does not post those files anywhere. Preserve the generated file until any separately requested handoff is complete.
+- VHS can render PNG screenshots and GIF/MP4/WebM recordings; it does not post those files anywhere unless `VHS_PUBLISH=true` is set in the environment or `--publish` is passed, which uploads GIF output to `vhs.charm.sh`. Run `vhs` with `VHS_PUBLISH` unset (or not `true`) and never pass `--publish`. Preserve the generated file until any separately requested handoff is complete.
