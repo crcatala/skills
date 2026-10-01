@@ -7,6 +7,8 @@ separately unless they carry `metadata.version` for their own breaking changes.
 ## [Unreleased]
 
 ### Added
+- `terminal-capture`: capture-only workflow for verified terminal screenshots and
+  recordings of CLI/TUI output with Charmbracelet VHS.
 - `brave-web`: `search.js --context` returns query-focused page passages through
   Brave's LLM Context endpoint (`--max-tokens`, `--threshold`); `BRAVE_SEARCH_API_KEY`
   is accepted as an alternative to `BRAVE_API_KEY`. Plain search snippets no longer
