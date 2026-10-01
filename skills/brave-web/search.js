@@ -8,16 +8,22 @@ const { createImpit, extractPdf, extractReadableContent, fetchValidated, isPdf }
 const { githubGuidance } = await import("./lib/github.js");
 const { loadCachedUrl, storeContent } = await import("./lib/cache.js");
 const { buildDomainFilteredQuery, matchesDomainFilters, normalizeDomain } = await import("./lib/domains.js");
+const { CONTEXT_THRESHOLDS, buildContextParams, decodeEntities, describeApiError, formatContextResults, normalizeContextResults } = await import("./lib/context.js");
 
 const DEFAULT_CONTENT_LIMIT = 5_000;
 const DEFAULT_CONTENT_CONCURRENCY = 3;
 const DEFAULT_CONTENT_TIMEOUT_MS = 15_000;
+const DEFAULT_CONTEXT_TOKENS = 4_096;
+const DEFAULT_CONTEXT_THRESHOLD = "strict";
 
 function usage() {
 	console.log(`Usage: search.js <query> [options]
 
 Options:
-  -n <num>                       Results (default: 5, max: 20)
+  -n <num>                       Results (default: 5, max: 20; max 50 with --context)
+  --context                      Return query-focused page passages (Brave LLM Context) instead of snippets
+  --max-tokens <num>             With --context: approximate passage budget (default: 4096, 1024-32768)
+  --threshold <mode>             With --context: strict (default), balanced, lenient, or disabled
   --content                      Fetch and include content for each result
   --content-limit <chars>        Content preview size (default: 5000, max: 100000)
   --content-concurrency <num>    Simultaneous content fetches (default: 3, max: 10)
@@ -31,6 +37,8 @@ Options:
 
 Examples:
   search.js "TypeScript decorators" --site typescriptlang.org
+  search.js "Next.js 15 breaking changes" --context
+  search.js "axum middleware" --context --site docs.rs --max-tokens 8192
   search.js "AI news" --exclude-site reddit.com --freshness pw
   search.js "API retries" --site docs.example.com --content --content-limit 10000
   search.js "React hooks" --content --cache-ttl 3600 --json`);
@@ -60,14 +68,28 @@ function boundedInteger(value, name, fallback, minimum, maximum) {
 	return number;
 }
 
+function braveApiKey() {
+	const apiKey = process.env.BRAVE_API_KEY || process.env.BRAVE_SEARCH_API_KEY;
+	if (!apiKey) throw new Error("BRAVE_API_KEY (or BRAVE_SEARCH_API_KEY) environment variable is required. Get a key at https://api-dashboard.search.brave.com/app/keys");
+	return apiKey;
+}
+
+async function fetchBraveContext(options) {
+	const response = await fetch(`https://api.search.brave.com/res/v1/llm/context?${buildContextParams(options)}`, {
+		headers: { Accept: "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": braveApiKey() },
+	});
+	if (!response.ok) throw new Error(describeApiError(response.status, await response.text()));
+	return normalizeContextResults(await response.json(), options.includeDomains, options.excludeDomains).slice(0, options.numUrls);
+}
+
 async function fetchBraveResults(query, numResults, country, freshness, includeDomains, excludeDomains) {
-	const apiKey = process.env.BRAVE_API_KEY;
-	if (!apiKey) throw new Error("BRAVE_API_KEY environment variable is required. Get a key at https://api-dashboard.search.brave.com/app/keys");
+	const apiKey = braveApiKey();
 	const hasDomainFilters = includeDomains.length > 0 || excludeDomains.length > 0;
 	const params = new URLSearchParams({
 		q: buildDomainFilteredQuery(query, includeDomains, excludeDomains),
 		count: String(hasDomainFilters ? 20 : numResults),
 		country,
+		text_decorations: "false",
 	});
 	if (freshness) params.append("freshness", freshness);
 	const response = await fetch(`https://api.search.brave.com/res/v1/web/search?${params}`, {
@@ -76,7 +98,7 @@ async function fetchBraveResults(query, numResults, country, freshness, includeD
 	if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}\n${await response.text()}`);
 	const data = await response.json();
 	return (data.web?.results || [])
-		.map((result) => ({ title: result.title || "", link: result.url || "", snippet: result.description || "", age: result.age || result.page_age || "" }))
+		.map((result) => ({ title: decodeEntities(result.title || ""), link: result.url || "", snippet: decodeEntities(result.description || ""), age: result.age || result.page_age || "" }))
 		.filter((result) => result.link && matchesDomainFilters(result.link, includeDomains, excludeDomains))
 		.slice(0, numResults);
 }
@@ -131,10 +153,19 @@ try {
 	if (args.includes("--help") || args.includes("-h")) { usage(); process.exit(0); }
 	const fetchContent = args.includes("--content");
 	if (fetchContent) args.splice(args.indexOf("--content"), 1);
+	const contextMode = args.includes("--context");
+	if (contextMode) args.splice(args.indexOf("--context"), 1);
 	const jsonOutput = args.includes("--json");
 	if (jsonOutput) args.splice(args.indexOf("--json"), 1);
 	const nValue = readOption(args, "-n");
-	const numResults = boundedInteger(nValue, "-n", 5, 1, 20);
+	const numResults = boundedInteger(nValue, "-n", 5, 1, contextMode ? 50 : 20);
+	const maxTokensValue = readOption(args, "--max-tokens");
+	const thresholdValue = readOption(args, "--threshold");
+	if (!contextMode && (maxTokensValue !== null || thresholdValue !== null)) throw new Error("--max-tokens and --threshold require --context");
+	if (contextMode && fetchContent) throw new Error("--context already returns page passages; it cannot be combined with --content (use content.js to read a whole page)");
+	const maxTokens = boundedInteger(maxTokensValue, "--max-tokens", DEFAULT_CONTEXT_TOKENS, 1_024, 32_768);
+	const threshold = thresholdValue ?? DEFAULT_CONTEXT_THRESHOLD;
+	if (!CONTEXT_THRESHOLDS.includes(threshold)) throw new Error(`--threshold must be one of: ${CONTEXT_THRESHOLDS.join(", ")}`);
 	const contentLimit = boundedInteger(readOption(args, "--content-limit"), "--content-limit", DEFAULT_CONTENT_LIMIT, 1, 100_000);
 	const contentConcurrency = boundedInteger(readOption(args, "--content-concurrency"), "--content-concurrency", DEFAULT_CONTENT_CONCURRENCY, 1, 10);
 	const contentTimeoutMs = boundedInteger(readOption(args, "--content-timeout-ms"), "--content-timeout-ms", DEFAULT_CONTENT_TIMEOUT_MS, 1_000, 120_000);
@@ -150,6 +181,16 @@ try {
 	const query = args.join(" ").trim();
 	if (!query) { usage(); process.exit(1); }
 
+	if (contextMode) {
+		const sources = await fetchBraveContext({ query, country, freshness, numUrls: numResults, maxTokens, threshold, includeDomains, excludeDomains });
+		if (jsonOutput) {
+			console.log(JSON.stringify({ query, country, freshness: freshness || null, mode: "context", results: sources }, null, 2));
+			process.exit(0);
+		}
+		if (sources.length === 0) { console.error("No results found."); process.exit(0); }
+		console.log(formatContextResults(sources));
+		process.exit(0);
+	}
 	const results = await fetchBraveResults(query, numResults, country, freshness, includeDomains, excludeDomains);
 	if (fetchContent) {
 		const content = await mapWithConcurrency(results, contentConcurrency, (result) => fetchPageContent(result.link, { contentLimit, timeoutMs: contentTimeoutMs, cacheTtlMs }));

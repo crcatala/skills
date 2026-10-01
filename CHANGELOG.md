@@ -7,6 +7,10 @@ separately unless they carry `metadata.version` for their own breaking changes.
 ## [Unreleased]
 
 ### Added
+- `brave-web`: `search.js --context` returns query-focused page passages through
+  Brave's LLM Context endpoint (`--max-tokens`, `--threshold`); `BRAVE_SEARCH_API_KEY`
+  is accepted as an alternative to `BRAVE_API_KEY`. Plain search snippets no longer
+  contain `<strong>` tags or HTML entities.
 - Initial collection of 11 model-invoked skills: `agent-browser`, `brave-web`,
   `exa-code`, `github-pr-screenshots`, `grok-research`, `image-gen`, `ralph`,
   `sentry`, `ticket`, `vexor`, and `youtube-transcript-api`.

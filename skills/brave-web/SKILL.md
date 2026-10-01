@@ -1,7 +1,7 @@
 ---
 name: brave-web
 description: Fast web search and safe URL extraction through Brave Search. Use for current facts, documentation, news, targeted domain searches, and reading article/PDF URLs as markdown. Lightweight and browser-free.
-compatibility: "Requires bun (or Node.js 22+), network access, and BRAVE_API_KEY. Dependencies install on first run."
+compatibility: "Requires bun (or Node.js 22+), network access, and BRAVE_API_KEY (or BRAVE_SEARCH_API_KEY). --context needs a Brave plan that includes LLM Context. Dependencies install on first run."
 ---
 
 # Brave Web Tools
@@ -15,7 +15,10 @@ Fast, browser-free web access with Brave Search and readable URL extraction. It 
 
 ## Setup
 
-Requires Node.js 22+ (the local PDF extractor, `unpdf`, requires it) and a Brave Search API key:
+Requires Node.js 22+ (the local PDF extractor, `unpdf`, requires it) and a Brave Search API key
+(`BRAVE_API_KEY`, or `BRAVE_SEARCH_API_KEY` as used by Brave's own tools). `--context` additionally
+needs a plan that includes LLM Context (Brave's Search plan); without it the API answers
+`OPTION_NOT_IN_PLAN` and the script says so.
 
 ```bash
 export BRAVE_API_KEY="your-api-key"
@@ -44,9 +47,34 @@ bun {baseDir}/search.js "OAuth PKCE guide" --site oauth.net --content
 bun {baseDir}/search.js "OAuth PKCE guide" --content --content-limit 10000 --cache-ttl 900 --json
 ```
 
+### Query-focused passages (`--context`)
+
+```bash
+# Best default for "answer this question / debug this error": relevant passages from ~5 pages in one fast call
+bun {baseDir}/search.js "Next.js 15 breaking changes migration guide" --context
+
+# Official docs only, bigger budget, last month
+bun {baseDir}/search.js "axum middleware" --context --site docs.rs --max-tokens 8192 --freshness pm
+```
+
+`--context` uses Brave's LLM Context endpoint: the server extracts and ranks the passages of each
+result that match the query (headings and code blocks preserved) and returns them within a token
+budget (about 4 chars per token). It replaces `--content` for research questions: it is faster
+(under a second versus several), query-focused instead of "first N characters of the page", and
+fetches nothing locally. It cannot read a specific URL or a whole page; use `content.js` for that.
+`--context` cannot be combined with `--content`.
+
 | Option | Description |
 |---|---|
-| `-n <num>` | Result count (default 5; max 20) |
+| `--context` | Return query-focused page passages instead of snippets (needs a plan with LLM Context) |
+| `--max-tokens <num>` | With `--context`: approximate passage budget (default 4096; 1024-32768) |
+| `--threshold <mode>` | With `--context`: `strict` (default), `balanced`, `lenient`, or `disabled` |
+
+### Options
+
+| Option | Description |
+|---|---|
+| `-n <num>` | Result count (default 5; max 20, or 50 with `--context`) |
 | `--content` | Fetch result pages concurrently (default 3), print a preview, and save full text in the one-hour cache |
 | `--content-limit <chars>` | Preview length (default 5k; maximum 100k) |
 | `--content-concurrency <num>` | Simultaneous page fetches (default 3; maximum 10) |
@@ -58,7 +86,7 @@ bun {baseDir}/search.js "OAuth PKCE guide" --content --content-limit 10000 --cac
 | `--site <domain>` | Include only this domain/subdomains (repeatable) |
 | `--exclude-site <domain>` | Exclude this domain/subdomains (repeatable) |
 
-Domain constraints are sent to Brave as `site:` filters **and enforced locally** on returned URLs. This prevents a loosely honored search constraint from leaking an excluded host into the result list. `--freshness` is a Brave API source-age filter; `--cache-ttl` controls only this skill's local extracted-content cache.
+Domain constraints are sent to Brave (as `site:` filters, or Goggles with `--context`) **and enforced locally** on returned URLs. This prevents a loosely honored search constraint from leaking an excluded host into the result list. `--freshness` is a Brave API source-age filter; `--cache-ttl` controls only this skill's local extracted-content cache.
 
 ## Read a URL
 

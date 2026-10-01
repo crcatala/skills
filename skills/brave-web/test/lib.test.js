@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { loadCachedUrl, loadContent, pruneCache, storeContent } from "../lib/cache.js";
+import { buildContextParams, buildGoggles, decodeEntities, describeApiError, formatContextResults, normalizeContextResults } from "../lib/context.js";
 import { createImpit, extractReadableContent, fetchValidated } from "../lib/content.js";
 import { findPassages } from "../lib/find.js";
 import { githubGuidance, parseGitHubUrl } from "../lib/github.js";
@@ -136,4 +137,51 @@ test("GitHub URLs return gh-first guidance instead of HTML scraping", () => {
 	assert.deepEqual(parseGitHubUrl("https://github.com/owner/repo/blob/main/README.md"), { owner: "owner", repo: "repo", view: "blob", ref: "main", path: ["README.md"] });
 	assert.match(githubGuidance("https://github.com/owner/repo"), /gh repo view owner\/repo/);
 	assert.equal(githubGuidance("https://github.com/owner/repo/issues/2"), null);
+});
+
+test("decodes HTML entities left in Brave snippets", () => {
+	assert.equal(decodeEntities("can&#x27;t &amp; won&#39;t &lt;b&gt; &quot;x&quot; &unknown; &#xZZ;"), "can't & won't <b> \"x\" &unknown; &#xZZ;");
+	assert.equal(decodeEntities("&#99999999999;"), "&#99999999999;");
+});
+
+test("builds LLM Context goggles and request parameters", () => {
+	assert.equal(buildGoggles([], []), null);
+	assert.equal(buildGoggles(["docs.rs", "crates.io"], ["example.com"]), "$discard\n$site=docs.rs\n$site=crates.io");
+	assert.equal(buildGoggles([], ["a.com", "b.org"]), "$discard,site=a.com\n$discard,site=b.org");
+	const params = buildContextParams({ query: "q", country: "US", freshness: "pw", numUrls: 5, maxTokens: 4096, threshold: "strict", includeDomains: [], excludeDomains: ["a.com"] });
+	assert.equal(params.get("maximum_number_of_urls"), "5");
+	assert.equal(params.get("maximum_number_of_tokens"), "4096");
+	assert.equal(params.get("context_threshold_mode"), "strict");
+	assert.equal(params.get("freshness"), "pw");
+	assert.equal(params.get("goggles"), "$discard,site=a.com");
+	assert.equal(params.get("count"), "10");
+	assert.equal(buildContextParams({ query: "q", country: "US", numUrls: 50, maxTokens: 1024, threshold: "lenient", includeDomains: [], excludeDomains: [] }).get("count"), "50");
+});
+
+test("normalizes LLM Context responses and enforces domain filters locally", () => {
+	const data = {
+		grounding: {
+			generic: [
+				{ url: "https://docs.example.com/a", title: "A &amp; B", snippets: ["one", "two"] },
+				{ url: "https://bad.example.org/x", title: "Bad", snippets: ["no"] },
+				{ url: "https://docs.example.com/b", snippets: [] },
+			],
+		},
+		sources: {
+			"https://docs.example.com/a": { age: ["Friday, September 25, 2026", "2026-09-25", "6 days ago"] },
+			"https://docs.example.com/b": { title: "From sources" },
+		},
+	};
+	const results = normalizeContextResults(data, [], ["example.org"]);
+	assert.deepEqual(results.map((result) => result.link), ["https://docs.example.com/a", "https://docs.example.com/b"]);
+	assert.equal(results[0].title, "A & B");
+	assert.equal(results[0].age, "6 days ago");
+	assert.equal(results[1].title, "From sources");
+	assert.deepEqual(normalizeContextResults({}, [], []), []);
+	assert.match(formatContextResults(results), /--- Source 1 ---\nTitle: A & B\nLink: https:\/\/docs\.example\.com\/a\nAge: 6 days ago\nPassages:\none\n\.\.\.\ntwo/);
+});
+
+test("explains plan errors for the LLM Context endpoint", () => {
+	assert.match(describeApiError(400, '{"code":"OPTION_NOT_IN_PLAN"}'), /does not include/);
+	assert.match(describeApiError(500, "boom"), /^HTTP 500\nboom$/);
 });
