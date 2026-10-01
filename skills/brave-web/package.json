@@ -1,0 +1,22 @@
+{
+	"name": "brave-search",
+	"version": "1.0.0",
+	"type": "module",
+	"description": "Headless web search via Brave Search - no browser required",
+	"author": "Mario Zechner",
+	"license": "MIT",
+	"engines": {
+		"node": ">=22"
+	},
+	"scripts": {
+		"test": "node --test test/*.test.js"
+	},
+	"dependencies": {
+		"@mozilla/readability": "^0.6.0",
+		"impit": "latest",
+		"jsdom": "^27.0.1",
+		"turndown": "^7.2.2",
+		"turndown-plugin-gfm": "^1.0.2",
+		"unpdf": "^1.6.2"
+	}
+}
