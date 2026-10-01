@@ -11,7 +11,7 @@ In the commands below, `{baseDir}` is the directory containing this `SKILL.md`.
 Upstream MIT attribution is bundled in
 [THIRD_PARTY_NOTICE.md](THIRD_PARTY_NOTICE.md) for standalone installations.
 
-Fast, browser-free web access with Brave Search and readable URL extraction. It is the quick research primitive; use `exa-code` for code-specific research, `grok-research` for multi-source synthesis, and `agent-browser` when a page requires an interactive browser.
+Fast, browser-free web access with Brave Search and readable URL extraction. It is a quick research primitive: it does not do code-specific research, multi-source synthesis, or interactive browsing.
 
 ## Setup
 
@@ -122,7 +122,7 @@ bun {baseDir}/content.js --cache a1b2c3d4e5f67890 --find "instalation steps" --f
 
 ## Safety and routing
 
-- **YouTube transcript requests:** When a YouTube URL or video ID is present and the user wants to understand, summarize, quote, translate, or obtain the spoken text, prefer the `youtube-transcript-api` skill. It retrieves native captions through Supadata and requires `SUPADATA_API_KEY`; it does not download media or request generated transcripts. Use Brave for web research about a YouTube page only when captions are not the goal or the user explicitly asks for web searching.
+- **YouTube transcript requests:** Reading a YouTube URL returns the page, not what is said in the video. When the user wants to understand, summarize, quote, or translate the spoken text, use a captions/transcript tool instead. Use Brave for web research about a YouTube page only when the transcript is not the goal.
 - Only `http:` and `https:` URLs are accepted. Localhost, internal names, private/link-local/reserved IP ranges, and private DNS answers are blocked. Redirect destinations are followed manually and validated before the next request.
 - These checks are DNS **preflight** protections, not DNS-rebinding-proof address pinning: the HTTP client resolves a hostname again when connecting. Run this skill only with network egress policy that independently blocks metadata and private/internal ranges when arbitrary hostile URLs are in scope.
 - Responses are bounded to 5MB. PDFs are text-extracted locally with `unpdf`; scanned PDFs with no text require a separate OCR-capable workflow.
@@ -131,6 +131,6 @@ bun {baseDir}/content.js --cache a1b2c3d4e5f67890 --find "instalation steps" --f
 ## When not to use it
 
 - **GitHub code, issues, PRs:** use `gh` or `git`, as the automatic GitHub route says.
-- **Interactive/login/JavaScript-only pages:** use `agent-browser`.
-- **Deep, multi-hop research or a cited synthesis:** use `grok-research`.
-- **Programming API examples:** prefer `exa-code`.
+- **Interactive/login/JavaScript-only pages:** use a real browser automation tool.
+- **Deep, multi-hop research or a cited synthesis:** use a research tool that plans searches and cites sources.
+- **Programming API examples:** use a code-documentation search tool.

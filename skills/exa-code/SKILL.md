@@ -12,7 +12,7 @@ Search for code documentation, examples, and API references using Exa AI. Optimi
 
 **Use this for:** Programming questions, API docs, code examples, library usage, framework patterns, best practices.
 
-**Use brave-web instead for:** General web searches, news, non-programming research.
+**Not for:** General web searches, news, non-programming research. Use a general web search tool for those.
 
 ## Setup
 
