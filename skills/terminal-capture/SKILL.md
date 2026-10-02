@@ -1,86 +1,68 @@
 ---
 name: terminal-capture
-description: Capture real rendered terminal output from CLI tools and TUIs as PNG screenshots or scripted GIF/video using Charmbracelet VHS. Use when asked for terminal, command-line, or TUI screenshots, recordings, or visual proof. Not for browser or desktop-app screenshots, and not for uploading or posting artifacts.
-compatibility: "Requires the vhs CLI (>= 0.12.0) with ttyd and ffmpeg on PATH."
+description: Capture real terminal output from CLI tools and TUIs as animated and static SVG (default, via svgcast and a scripted PTY recorder), or as PNG/GIF/MP4/WebM via Charmbracelet VHS when explicitly requested. Scans for secrets before and after, and stops if anything sensitive appears. Use for terminal, command-line, or TUI screenshots, recordings, demos, or visual proof. Not for browser or desktop-app screenshots, and not for uploading or posting artifacts.
+compatibility: "Needs Go >= 1.25 (builds the pinned svgcast and Betterleaks from source) and python3 with POSIX pty (Linux/macOS), plus bash. Optional: asciinema, a headless Chromium/Chrome for previews. VHS fallback (PNG/GIF/video) needs vhs >= 0.12.0, ttyd, ffmpeg."
 ---
 
-# Terminal Capture with VHS
+# Terminal Capture
 
-Use Charmbracelet VHS to render a CLI or TUI inside a controlled virtual terminal and save its visible output as an image or recording. This skill owns **capture only**: create and verify the requested local artifact, then report its path. Do not upload, post, or commit artifacts unless separately requested.
+Record a CLI or TUI in a controlled pseudo-terminal and save its rendered output as **SVG**: one animated file and one static still. This skill owns **capture only**: produce and verify local artifacts, then report their paths. Do not upload, post, or commit them unless separately asked.
 
-VHS captures terminal sessions, not browser or desktop windows. Its virtual terminal works well for normal ANSI styling and most TUIs, but may differ from a user's particular terminal emulator or fail to reproduce emulator-specific graphics/protocols.
+`{baseDir}` below means the directory containing this `SKILL.md`.
 
-## Choose the smallest useful artifact
+## Safety gate (read first, applies to every capture)
 
-- **Static proof / final state:** PNG via VHS `Screenshot`. Default to one PNG unless the user asks for more.
-- **Interaction, transitions, progress, or animation:** GIF when a compact, easily previewed loop is useful; MP4/WebM when video is requested or a longer, smoother recording is more appropriate.
-- Don't create a GIF/video just to show a still screen. Don't capture extra states or add decorative window chrome unless useful or requested.
+A terminal capture can publish whatever the terminal shows: API keys, tokens, private keys, `.env` contents, internal hostnames, customer data, usernames and paths. Treat every capture as something that may be shared.
 
-When the request combines capture with posting (for example to a PR), create and verify the artifact here, then report the exact local path and a concise suggested caption so the upload step can use them.
+1. **Before recording,** decide exactly what will appear on screen: the command, its arguments, environment, config and data files, URLs, and any network targets. Use safe dummy or mock values and fixtures. Never `cat .env`, run `env`/`printenv`, or run commands against production or personal data just to have something to show.
+2. **After recording,** scan the result with `scripts/scan_secrets.py`, which runs built-in rules plus the pinned Betterleaks engine (`capture.sh` does this for you), **and** look at the capture yourself.
+3. **If there is significant risk, stop and abort.** That means: a BLOCK finding from the scanner; a real credential in the command, environment, fixtures or output; the demo needing real credentials or touching sensitive data with no safe substitute; or any output you cannot confidently classify as non-sensitive. Do not render or keep going. Delete artifacts that contain the sensitive content, do not repeat the secret in your message (give its type and location only), and **tell the user and wait** before proceeding.
+
+Full checklist, the stop-and-notify message, and what the scanner can't catch: [references/safety.md](references/safety.md).
+
+## Choose the format
+
+- **Default: svgcast SVG.** Always produce both, unless told otherwise: `NAME.svg` (animated) and `NAME-still.svg` (static, the final frame).
+- **VHS fallback.** If the user explicitly asks for PNG, GIF, MP4 or WebM, or the destination cannot show animated SVG, follow [references/vhs.md](references/vhs.md) instead. The safety gate still applies. If the destination is unknown and matters (for example chat or email), say SVG may not animate there and offer PNG/GIF.
+- Do not add extras (more states, window chrome, `--controls`) unless asked. `--controls` embeds a `<script>`; the default output has none.
 
 ## Requirements
 
-- Check: `vhs --version` (needs **0.12.0 or newer**, which introduced `Set Columns` and `Set Rows`), plus `command -v ttyd ffmpeg`.
-- Install: see the [VHS installation guide](https://github.com/charmbracelet/vhs#installation) (package managers, Docker).
-- If anything is missing or too old, report it and stop, or ask to use an approved setup. Never install system packages or change the host environment on your own.
+- Check: `command -v go python3 bash`, and `go version` is 1.25 or newer.
+- svgcast (**v0.2.0**) and the Betterleaks secret scanner (**v1.9.0**) are built from source at those pinned, hash-checked versions into a user-local directory by `scripts/install_svgcast.sh` and `scripts/install_betterleaks.sh` (both run automatically by `capture.sh`, before anything is recorded). The skill never installs system packages. Details and upgrade policy: [references/install.md](references/install.md).
+- If Go or Python is missing, report it and stop. Do not install them yourself.
 
 ## Workflow
 
-1. **Understand the target and state.** Identify the CLI/TUI command, the state that proves the behavior, and any needed fixture/setup. Reuse a suitable project `.tape` if one exists. Do not guess at destructive, external, or credentialed actions; use a safe fixture or ask first.
-2. **Plan a reproducible tape.** Use an explicit shell and terminal dimensions appropriate to the output. Set `TERM` to a suitable terminal type (usually `xterm-256color`) and force color only if the application otherwise disables styling in the capture environment. Prefer fixture data and stable commands over network services or personal data.
-3. **Capture the requested state.** Use `Screenshot <path>.png` for a still. For a recording, declare an `Output <path>.gif`, `.mp4`, or `.webm`, then script the actual keys and pauses needed to show the behavior. Use `Wait` with stable visible text when practical; use a short `Sleep` only when output has no reliable wait condition. For TUIs, send navigation/selection keys and wait for the intended screen before taking the screenshot.
-4. **Keep the artifact easy to find.** Use a unique path under `/tmp` by default so generated captures don't pollute or accidentally enter the source tree. If the user requests a durable location, use that instead. Never overwrite an existing artifact without checking first.
-5. **Verify the result.** Confirm the expected file exists, is non-empty, and has the requested format. Open/inspect the image or recording with available image/video viewing tools. Check that the relevant styling and state are visible, text is legible, and no secrets, unrelated terminal output, or accidental prompts are exposed. Re-capture or report the limitation if it is not right; don't present an uninspected artifact as verified.
-6. **Return a concise handoff.** State what was captured, the exact artifact path, and any relevant caveat. Do not claim the artifact was attached, posted, or committed unless another authorized step actually did that.
+1. **Understand the target.** Identify the command and the state that proves the behavior. Prepare fixtures or mock data and a safe working directory. Run the Safety gate step 1.
+2. **Write a scenario** (a JSON list of steps) in a scratch location, not in the source tree:
 
-## Tape patterns
+   ```json
+   [
+     ["run", "my-cli --help"],
+     ["wait", "Usage:", 10],
+     ["sleep", 1.5]
+   ]
+   ```
 
-### Static screenshot
+   Steps: `type`, `run` (type then Enter), `key` (`Enter`, `Down`, `Esc`, `Ctrl+C`, or a literal like `j`), `sleep`, `wait` (regex, timeout seconds). Prefer `wait` on stable visible text over fixed sleeps. A failed `wait` fails the recording. Format and TUI examples: [references/pty-recorder.md](references/pty-recorder.md).
+3. **End on the state you want to show.** The still is the **last frame**. For a TUI, finish while the target screen is visible; do not quit it (the recorder stops the process itself).
+4. **Run the pipeline.** One command records, scans, renders, and scans again:
 
-```tape
-Set Shell bash
-Set Columns 100
-Set Rows 30
-Env TERM "xterm-256color"
+   ```bash
+   {baseDir}/scripts/capture.sh --cols 100 --rows 30 NAME scenario.json
+   ```
 
-Type "./my-cli --help"
-Enter
-Wait+Screen /Usage:/
-Screenshot /tmp/my-cli-help.png
-Sleep 500ms
-```
+   Useful options: `--out-dir DIR`, `--theme auto|light|dark`, `--cwd DIR`, `--env NAME=VALUE`, `--svgcast-args "--idle-time-limit 2s --speed 1.5"`. By default the output directory is a fresh `mktemp -d` under `$TMPDIR` or `/tmp`; use another location only if the user asks. Never overwrite existing artifacts without checking.
+5. **Handle the exit code.** `10` means the scan blocked the capture and already deleted this run's artifacts: stop and notify the user (Safety gate step 3). `11` means the scan could not complete (for example the second engine failed): it did not pass, and the unscanned artifacts were deleted, so fix the scanner problem and re-run; never skip the scan. Other non-zero codes are tool failures: read the message, fix the scenario, and retry. Printed WARN lines (emails, IPs, home paths, high-entropy strings) do not stop the run: review each and report them in the handoff. If the artifact will be shared or committed, resolve them first.
+6. **Inspect the result yourself.** Open or rasterize it: `python3 {baseDir}/scripts/preview.py NAME-still.svg --out shot.png` (and `--at SECONDS` on the animated file to check a moment mid-animation), then view the PNG. Confirm the expected state is visible and legible, colors and styling look right, and nothing sensitive or unrelated is on screen. If it is wrong, adjust the scenario and re-record.
+7. **Hand off concisely.** State what was captured, the exact paths and sizes, any WARN findings, and caveats. Do not claim it was uploaded, attached, or committed unless a separate authorized step did that. When the request combines capture with posting, report the paths and a short suggested caption for that step.
 
-Replace the command and wait expression with ones that match the project. `Screenshot` marks the next recorded frame to be saved as PNG, and VHS stops recording as soon as the last command finishes, so end the tape with a short `Sleep` after it or the PNG may never be written (silently). If the target is a TUI, launch it, script the necessary key presses, wait for the target state, then screenshot that state.
+## Facts that affect the output
 
-### Short interaction recording
-
-```tape
-Output /tmp/my-tui-demo.gif
-Set Shell bash
-Set Columns 100
-Set Rows 30
-Set FontSize 18
-Set Theme "Catppuccin Mocha"
-Set TypingSpeed 0
-Env TERM "xterm-256color"
-
-Type "./my-tui"
-Enter
-Wait+Screen /Dashboard/
-Sleep 500ms
-Down
-Enter
-Wait+Screen /Saved successfully/
-Sleep 1s
-```
-
-Choose an output extension supported by VHS for the requested format. Keep recordings focused and short; use `Set Framerate` or `Set PlaybackSpeed` only when needed. A tape can also include `Screenshot path.png` at a key point if both a still and a recording are useful.
-
-## Practical details
-
-- VHS tape settings belong before interaction commands. Set shell, dimensions, theme, and output configuration up front.
-- Use explicit dimensions (`Set Columns` / `Set Rows`, or pixel `Set Width` / `Set Height`) so wrapping and TUI layout are repeatable. Do not combine `Set Columns` with `Set Width`, or `Set Rows` with `Set Height`.
-- VHS supports scripted typing and keys (`Type`, `Enter`, arrows, `Tab`, `Ctrl+…`), waits, sleeps, `Hide`/`Show`, screenshots, and multiple output formats. See the [official tape command reference](https://github.com/charmbracelet/vhs#vhs-command-reference) when a command or setting is unclear.
-- Avoid timing-only tapes where an output-ready signal exists. Fixed delays can be flaky on slower machines; use bounded `Wait` patterns for stable visible text where possible.
-- Don't include secrets in tape source, command arguments, environment values, or captures. Use redacted fixtures and hide setup from recordings when appropriate.
-- VHS can render PNG screenshots and GIF/MP4/WebM recordings; it does not post those files anywhere unless `VHS_PUBLISH=true` is set in the environment or `--publish` is passed, which uploads GIF output to `vhs.charm.sh`. Run `vhs` with `VHS_PUBLISH` unset (or not `true`) and never pass `--publish`. Preserve the generated file until any separately requested handoff is complete.
+- svgcast reads **asciicast v2** only. The bundled recorder writes v2; if you record with asciinema 3.x, ask for v2 (see install reference).
+- Defaults to `--theme auto`: the SVG follows the viewer's light/dark setting (white background in a light viewer). Pass `--theme dark` or `light` to fix it.
+- Animated SVG plays in `<img>` tags, including GitHub READMEs, but many chat and email clients show it as a still image or not at all. It is text-based, so it stays crisp and selectable, and is usually far smaller than a GIF; dense, constantly redrawing TUIs can be larger.
+- Known svgcast limits: CJK and double-width characters may misalign; blinking text, faint text and strikethrough are not rendered; fonts come from the viewer's system unless embedded (`--embed-font` for Nerd Font glyphs).
+- The recorder runs a clean `bash` (`$ ` prompt) in a scrubbed environment with an empty temporary `HOME`. Tools that need their config or state must be pointed at fixtures with `--env` or `--cwd`. Credentials are never passed through by default; do not add them with `--pass-env`.
+- Do not include secrets in scenarios, tapes, command arguments, environment values, or captures.
