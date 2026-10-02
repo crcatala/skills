@@ -21,8 +21,10 @@ Scenario: a JSON list of steps, each a list:
                               since the last type/run/key step; fail if it never appears
 
 Exit codes: 0 ok, 2 bad usage or scenario, 3 wait timed out, 4 shell exited early.
+The shell is always torn down within a few seconds, even if a program ignores SIGHUP.
 """
 import argparse
+import codecs
 import fcntl
 import json
 import os
@@ -55,6 +57,19 @@ _ANSI = re.compile(
 
 class ScenarioError(Exception):
     pass
+
+
+class Utf8Stream:
+    """Decode a byte stream read in arbitrary chunks without splitting multibyte characters."""
+
+    def __init__(self):
+        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+
+    def feed(self, data):
+        return self._decoder.decode(data)
+
+    def flush(self):
+        return self._decoder.decode(b"", final=True)
 
 
 def strip_ansi(text):
@@ -115,7 +130,7 @@ def build_env(pass_env, extra_env, keep_home, home_dir):
 class Recorder:
     def __init__(self, cols, rows, env, cwd, type_delay, max_seconds):
         self.cols, self.rows, self.type_delay = cols, rows, type_delay
-        self.events, self.since = [], ""
+        self.events, self.since, self.utf8 = [], "", Utf8Stream()
         self.deadline = time.time() + max_seconds
         shell = shutil.which("bash", path=env.get("PATH")) or "/bin/sh"
         args = [shell, "--noprofile", "--norc"] if shell.endswith("bash") else [shell]
@@ -141,11 +156,14 @@ class Recorder:
             if not data:
                 self.alive = False
                 break
-            text = data.decode("utf-8", "replace")
-            self.events.append([round(time.time() - self.t0, 3), "o", text])
-            self.since += strip_ansi(text)
+            self.record(self.utf8.feed(data))
         if time.time() >= self.deadline:
             raise TimeoutError("--max-seconds exceeded")
+
+    def record(self, text):
+        if text:
+            self.events.append([round(time.time() - self.t0, 3), "o", text])
+            self.since += strip_ansi(text)
 
     def send(self, text, delay):
         self.since = ""
@@ -176,13 +194,70 @@ class Recorder:
 
     def finish(self):
         self.pump(0.3)  # settle, so the last frame is the state the caller asked for
+        self.record(self.utf8.flush())
+        self.terminate()
+
+    def _reap(self, timeout):
+        """True once the shell has exited and been reaped (never blocks longer than timeout)."""
+        end = time.time() + timeout
+        while True:
+            try:
+                done, _ = os.waitpid(self.pid, os.WNOHANG)
+            except ChildProcessError:
+                return True
+            if done:
+                return True
+            if time.time() >= end:
+                return False
+            time.sleep(0.02)
+
+    def _process_groups(self):
+        """Every process group in the shell's session. Interactive bash puts each job in its
+        own group, so signalling only the shell's group would miss the program it is running."""
+        groups = {self.pid}
         try:
-            os.kill(self.pid, signal.SIGHUP)
-        except ProcessLookupError:
+            groups.add(os.tcgetpgrp(self.fd))  # the pty's foreground job
+        except OSError:
             pass
+        try:  # Linux: background jobs too (fields after the command name: state ppid pgrp session)
+            for entry in os.listdir("/proc"):
+                if entry.isdigit():
+                    try:
+                        with open(f"/proc/{entry}/stat") as f:
+                            fields = f.read().rsplit(")", 1)[1].split()
+                        if int(fields[3]) == self.pid:
+                            groups.add(int(fields[2]))
+                    except (OSError, IndexError, ValueError):
+                        pass
+        except OSError:
+            pass
+        return groups
+
+    def _signal_session(self, sig):
+        own_group = os.getpgrp()
+        for group in self._process_groups():
+            # tcgetpgrp() can return 0 when the terminal has no foreground group, and
+            # killpg(0, ...) would signal this very process: never signal 0, 1, or our own group.
+            if group <= 1 or group == own_group:
+                continue
+            try:
+                os.killpg(group, sig)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+    def terminate(self, grace=2.0):
+        """Stop the shell and everything it started. Bounded: SIGHUP, then SIGKILL to the whole session."""
+        if getattr(self, "terminated", False):
+            return
+        self.terminated = True
+        self._signal_session(signal.SIGHUP)
+        if not self._reap(grace):
+            self._signal_session(signal.SIGKILL)
+            self._reap(grace)
+        self._signal_session(signal.SIGKILL)  # orphans that ignored SIGHUP after the shell exited
         try:
-            os.waitpid(self.pid, 0)
-        except ChildProcessError:
+            os.close(self.fd)
+        except OSError:
             pass
 
 
@@ -255,11 +330,8 @@ def main(argv=None):
         print(f"pty_record: {e}", file=sys.stderr)
         return 3
     finally:
-        if rec and rec.alive:
-            try:
-                os.kill(rec.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+        if rec:
+            rec.terminate()
         shutil.rmtree(home, ignore_errors=True)
     print(f"wrote {a.out} ({len(rec.events)} events, {rec.events[-1][0]:.1f}s)" if rec.events
           else f"wrote {a.out} (no output)")

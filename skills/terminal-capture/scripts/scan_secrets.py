@@ -19,9 +19,13 @@ look at the capture too.
 
 Usage: scan_secrets.py [--betterleaks BIN] [--fail-on-warn] [--json] PATH...   ("-" reads stdin)
 Exit:  0 no BLOCK findings, 1 BLOCK findings (or WARN with --fail-on-warn),
-       2 unreadable input or the second engine failed (fail closed)
+       2 unreadable input, or the second engine failed and nothing blocking was found
+       (fail closed: the scan is incomplete, treat it as not passed). Findings from the
+       built-in rules are always reported, even when the second engine fails.
 """
 import argparse
+import base64
+import binascii
 import html
 import json
 import math
@@ -71,6 +75,35 @@ def strip_ansi(text):
     return _ANSI.sub("", text)
 
 
+# Escape sequences that carry text a terminal never draws: OSC (window title, OSC 8 hyperlink
+# URLs, OSC 52 clipboard writes), DCS, APC, PM, SOS, and the screen/tmux title ESC k.
+# strip_ansi() drops them, so their payloads are extracted and scanned separately: a
+# recording keeps them even though the rendered SVG does not.
+_OSC = re.compile(r"\x1b\]([^\x07\x1b]*)(?:\x07|\x1b\\)")
+_OTHER_STRINGS = re.compile(r"\x1b(?:[P_^X]((?:[^\x1b]|\x1b(?!\\))*)|k([^\x1b]*))\x1b\\", re.S)
+
+
+def hidden_payloads(stream):
+    """Payload text of string escape sequences in a raw terminal stream (OSC 52 also decoded)."""
+    payloads = [m.group(1) for m in _OSC.finditer(stream)]
+    payloads += [m.group(1) or m.group(2) or "" for m in _OTHER_STRINGS.finditer(stream)]
+    for payload in list(payloads):
+        if payload.startswith("52;"):  # OSC 52: "52;<selection>;<base64 clipboard data>"
+            data = payload.split(";", 2)[-1].strip()
+            try:
+                payloads.append(base64.b64decode(data + "=" * (-len(data) % 4)).decode("utf-8", "replace"))
+            except (binascii.Error, ValueError):
+                pass
+    return [p for p in payloads if p]
+
+
+def visible_text(stream):
+    """What a person sees, then (appended) the hidden escape-sequence payloads."""
+    text = strip_ansi(stream)
+    hidden = hidden_payloads(stream)
+    return text + ("\n" + "\n".join(hidden) if hidden else "")
+
+
 def redact(value):
     return f"{value[:4]}…({len(value)} chars)" if len(value) > 6 else "…"
 
@@ -96,15 +129,15 @@ def load_text(path, data=None):
                     parts.append(ev[2])
             header = json.loads(lines[0]) if lines else {}
         except (json.JSONDecodeError, TypeError):
-            return strip_ansi(raw)
+            return visible_text(raw)
         env = header.get("env") or {}
         head = "\n".join(f"{k}={v}" for k, v in env.items()) if isinstance(env, dict) else ""
-        return head + "\n" + strip_ansi("".join(parts)).replace("\r\n", "\n").replace("\r", "\n")
+        return head + "\n" + visible_text("".join(parts)).replace("\r\n", "\n").replace("\r", "\n")
     if path.endswith(".svg"):
         texts = re.findall(r"<text\b[^>]*>(.*?)</text>", raw, re.S)
         if texts:  # one <text> is one screen line in svgcast output
             return "\n".join(html.unescape(re.sub(r"<[^>]+>", "", t)) for t in texts)
-    return strip_ansi(raw)
+    return visible_text(raw)
 
 
 def scan_text(text, source="<text>"):
@@ -147,7 +180,11 @@ def scan_text(text, source="<text>"):
 
 
 class EngineError(Exception):
-    pass
+    """The second engine could not complete. `partial` holds findings already gathered."""
+
+    def __init__(self, message, partial=()):
+        super().__init__(message)
+        self.partial = list(partial)
 
 
 def betterleaks_command(binary):
@@ -186,12 +223,15 @@ def run_betterleaks(binary, text, source):
 
 def scan_path(path, betterleaks=None):
     if path == "-":
-        text, source = strip_ansi(sys.stdin.read()), "<stdin>"
+        text, source = visible_text(sys.stdin.read()), "<stdin>"
     else:
         text, source = load_text(path), path
     findings = scan_text(text, source)
     if betterleaks:
-        findings += run_betterleaks(betterleaks, text, source)
+        try:
+            findings += run_betterleaks(betterleaks, text, source)
+        except EngineError as e:
+            raise EngineError(str(e), partial=findings)
     return findings
 
 
@@ -204,11 +244,16 @@ def main(argv=None):
                    help="also scan with this pinned Betterleaks binary (see install_betterleaks.sh)")
     a = p.parse_args(argv)
 
-    findings = []
+    findings, engine, engine_error = [], a.betterleaks, None
     for path in a.paths:
         try:
-            findings += scan_path(path, a.betterleaks)
-        except (OSError, EngineError) as e:
+            findings += scan_path(path, engine)
+        except EngineError as e:
+            # Keep what the built-in rules found (for this and every remaining file) so a
+            # blocking finding is never lost because the second engine failed.
+            findings += e.partial
+            engine_error, engine = engine_error or str(e), None
+        except OSError as e:
             print(f"scan_secrets: {e}", file=sys.stderr)
             return 2
 
@@ -219,9 +264,14 @@ def main(argv=None):
     else:
         for f in sorted(findings, key=lambda f: (f["severity"] != "BLOCK", f["source"], f["line"])):
             print(f"{f['severity']:5}  {f['source']}:{f['line']}  {f['rule']}  {f['preview']}")
-        engines = "builtin+betterleaks" if a.betterleaks else "builtin only"
+        engines = "builtin+betterleaks" if a.betterleaks and not engine_error else "builtin only"
         print(f"scan_secrets: {len(blocks)} blocking, {len(warns)} warning(s) in {len(a.paths)} file(s) [{engines}]")
-    return 1 if blocks or (warns and a.fail_on_warn) else 0
+    if engine_error:
+        print(f"scan_secrets: SCAN INCOMPLETE: {engine_error}; results above are from the built-in rules only",
+              file=sys.stderr)
+    if blocks or (warns and a.fail_on_warn):
+        return 1
+    return 2 if engine_error else 0
 
 
 if __name__ == "__main__":

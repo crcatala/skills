@@ -18,7 +18,12 @@
 #   --svgcast-args "..."   extra svgcast flags, e.g. "--idle-time-limit 2s --speed 1.5"
 #
 # Outputs (in the output directory): NAME.cast, NAME.svg (animated), NAME-still.svg
-# (static, the final frame). Exit: 0 ok, 10 blocked by the secret scan, other = tool failure.
+# (static, the final frame). Exit: 0 ok, 10 blocked by the secret scan, 11 the scan
+# could not complete (artifacts deleted), other = tool failure.
+#
+# An artifact is deleted unless it has passed a scan: the recording until the scan of
+# the recording passes, the SVGs until the scan of the SVGs passes. This also applies
+# when the script is interrupted or crashes.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,10 +59,32 @@ mkdir -p "$out_dir"
 cast="$out_dir/$name.cast" svg="$out_dir/$name.svg" still="$out_dir/$name-still.svg"
 for f in "$cast" "$svg" "$still"; do [ ! -e "$f" ] || die "refusing to overwrite $f"; done
 
-blocked() {  # scan results already printed; remove this run's artifacts and stop
-    rm -f "$cast" "$svg" "$still"
+cast_ok=0 svg_ok=0
+cleanup() {  # runs on every exit: never leave an unscanned artifact behind
+    [ "$cast_ok" = 1 ] || rm -f "$cast"
+    [ "$svg_ok" = 1 ] || rm -f "$svg" "$still"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
+
+blocked() {  # scan results already printed; the exit trap removes this run's artifacts
     echo "capture: BLOCKED ($1). Generated artifacts were deleted. Stop and tell the user before continuing." >&2
     exit 10
+}
+failed() {
+    echo "capture: the secret scan could not complete ($1), so it did not pass. Generated artifacts were deleted." >&2
+    echo "  Fix the scanner problem and re-run; do not skip the scan." >&2
+    exit 11
+}
+check_scan() {  # check_scan STAGE FILE... : exit 10 on a finding, 11 if the scan was incomplete
+    local stage="$1" rc=0
+    shift
+    scan "$@" || rc=$?
+    case "$rc" in
+        0) ;;
+        1) blocked "$stage" ;;
+        *) failed "$stage" ;;
+    esac
 }
 
 # 0. Build the pinned tools first so a missing requirement fails before anything is recorded.
@@ -66,21 +93,23 @@ betterleaks="$("$HERE/install_betterleaks.sh")"
 scan() { python3 "$HERE/scan_secrets.py" --betterleaks "$betterleaks" "$@"; }
 
 # 1. Preflight: the scenario file itself must not contain secrets.
-scan "$scenario" || { [ $? -eq 1 ] && blocked "scenario file"; die "scan failed"; }
+check_scan "scenario file" "$scenario"
 
 # 2. Record in a scrubbed environment.
 python3 "$HERE/pty_record.py" --out "$cast" --scenario "$scenario" --cols "$cols" --rows "$rows" \
     --cwd "$cwd" ${rec_args[@]+"${rec_args[@]}"}
 
 # 3. Scan the raw recording (typed input and all output) before rendering anything.
-scan "$cast" || { [ $? -eq 1 ] && blocked "recording"; die "scan failed"; }
+check_scan "recording" "$cast"
+cast_ok=1
 
 # 4. Render animated + still. Word-splitting of $extra is intentional.
 # shellcheck disable=SC2086
 "$svgcast" "$cast" -o "$svg" --still "$still" --theme "$theme" $extra
 
 # 5. Scan what was actually rendered.
-scan "$svg" "$still" || { [ $? -eq 1 ] && blocked "rendered SVG"; die "scan failed"; }
+check_scan "rendered SVG" "$svg" "$still"
+svg_ok=1
 
 echo
 echo "capture: done (scan clean of blocking findings; still inspect the result by eye)"

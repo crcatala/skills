@@ -303,6 +303,248 @@ class RealBetterleaksTests(unittest.TestCase):
         self.assertNotIn(self.GROQ_KEY, json.dumps(found))
 
 
+def cast_with(*chunks):
+    """A minimal asciicast v2 file whose output events are the given raw chunks."""
+    header = json.dumps({"version": 2, "width": 80, "height": 24})
+    return "\n".join([header] + [json.dumps([0.1 * i, "o", c]) for i, c in enumerate(chunks, 1)]).encode()
+
+
+class HiddenPayloadTests(unittest.TestCase):
+    """Escape sequences that carry text a terminal never draws are still kept in a recording."""
+
+    def scan_cast(self, *chunks):
+        return scan_secrets.scan_text(scan_secrets.load_text("x.cast", cast_with(*chunks)))
+
+    def test_secret_in_every_hidden_sequence_form_is_found(self):
+        b64 = __import__("base64").b64encode(FAKE_GH.encode()).decode()
+        forms = {
+            "osc title (BEL)": f"\x1b]0;title {FAKE_AWS}\x07shown\n",
+            "osc title (ST)": f"\x1b]2;title {FAKE_AWS}\x1b\\shown\n",
+            "osc 8 hyperlink url": f"\x1b]8;;https://example.test/login?t={FAKE_AWS}\x1b\\click\x1b]8;;\x1b\\\n",
+            "osc 52 clipboard (base64)": f"\x1b]52;c;{b64}\x07copied\n",
+            "dcs": f"\x1bP1;1|{FAKE_AWS}\x1b\\",
+            "apc": f"\x1b_Gi=1;{FAKE_AWS}\x1b\\",
+            "pm": f"\x1b^{FAKE_AWS}\x1b\\",
+            "screen/tmux title": f"\x1bk{FAKE_AWS}\x1b\\",
+            "unterminated osc": f"\x1b]0;{FAKE_AWS}",
+        }
+        for name, chunk in forms.items():
+            with self.subTest(form=name):
+                found = self.scan_cast(chunk)
+                self.assertTrue(rules(found, "BLOCK"), f"{name}: secret not found")
+
+    def test_secret_split_across_events_inside_a_hidden_sequence_is_found(self):
+        self.assertTrue(rules(self.scan_cast("\x1b]0;" + FAKE_AWS[:9], FAKE_AWS[9:] + "\x07"), "BLOCK"))
+
+    def test_hidden_text_without_a_secret_is_not_a_finding(self):
+        self.assertEqual(self.scan_cast("\x1b]0;my-project - zsh\x07\x1b]8;;https://example.test/docs\x1b\\docs\x1b]8;;\x1b\\\n"), [])
+
+    def test_visible_text_is_unchanged_by_the_extraction(self):
+        text = scan_secrets.load_text("x.cast", cast_with("\x1b[1mhello\x1b[0m \x1b]0;t\x07world\n"))
+        self.assertIn("hello world", text)
+
+    def test_plain_files_and_stdin_style_text_are_covered_too(self):
+        text = scan_secrets.load_text("notes.txt", f"\x1b]0;{FAKE_AWS}\x07ok".encode())
+        self.assertTrue(rules(scan_secrets.scan_text(text), "BLOCK"))
+
+
+class EngineFailureTests(unittest.TestCase):
+    SCRIPT = str(HERE / "scripts/scan_secrets.py")
+
+    def run_scan(self, engine, *files):
+        return subprocess.run([sys.executable, self.SCRIPT, "--betterleaks", engine, *map(str, files)],
+                              capture_output=True, text=True)
+
+    def test_builtin_findings_survive_an_engine_failure(self):
+        with tempfile.TemporaryDirectory() as d:
+            bad, _ = write_fake_engine(d, exit_code=3)
+            leak = Path(d, "leak.txt")
+            leak.write_text(f"key {FAKE_AWS}")
+            r = self.run_scan(bad, leak)
+        self.assertEqual(r.returncode, 1)  # the finding decides the exit code, not the failure
+        self.assertIn("aws-access-key-id", r.stdout)
+        self.assertIn("SCAN INCOMPLETE", r.stderr)
+
+    def test_a_failure_with_nothing_found_is_an_incomplete_scan(self):
+        with tempfile.TemporaryDirectory() as d:
+            bad, _ = write_fake_engine(d, exit_code=3)
+            clean = Path(d, "clean.txt")
+            clean.write_text("hello")
+            r = self.run_scan(bad, clean)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("SCAN INCOMPLETE", r.stderr)
+        self.assertIn("builtin only", r.stdout)
+
+    def test_files_after_the_failure_are_still_scanned_by_the_builtin_rules(self):
+        with tempfile.TemporaryDirectory() as d:
+            bad, _ = write_fake_engine(d, exit_code=3)
+            first, second = Path(d, "a.txt"), Path(d, "b.txt")
+            first.write_text("hello")
+            second.write_text(f"key {FAKE_AWS}")
+            r = self.run_scan(bad, first, second)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("b.txt", r.stdout)
+
+
+@unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "needs a POSIX pty and bash")
+class CaptureScriptTests(unittest.TestCase):
+    """capture.sh with stub installers: no network, no Go, real recorder and scanner."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.scripts = Path(self.tmp.name, "scripts")
+        shutil.copytree(HERE / "scripts", self.scripts, ignore=shutil.ignore_patterns("__pycache__"))
+        stub = Path(self.tmp.name, "svgcast")
+        stub.write_text(
+            "#!/bin/sh\n"
+            'while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift;; --still) still="$2"; shift;; esac; shift; done\n'
+            'echo "<svg><text>ok</text></svg>" > "$out"; echo "<svg><text>ok</text></svg>" > "$still"\n')
+        stub.chmod(0o755)
+        self.install("install_svgcast.sh", str(stub))
+
+    def install(self, name, binary):
+        path = self.scripts / name
+        path.write_text(f"#!/bin/sh\necho {binary}\n")
+        path.chmod(0o755)
+
+    def counting_engine(self, fail_from):
+        """An engine that works for the first scans and fails from the Nth call on."""
+        counter = Path(self.tmp.name, "calls")
+        engine = Path(self.tmp.name, "engine")
+        engine.write_text(
+            "#!/bin/sh\n"
+            f'n=$(cat "{counter}" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "{counter}"\n'
+            f"cat > /dev/null\nif [ $n -ge {fail_from} ]; then exit 3; fi\necho '[]'\n")
+        engine.chmod(0o755)
+        self.install("install_betterleaks.sh", str(engine))
+
+    def capture(self, command):
+        scenario = Path(self.tmp.name, "s.json")
+        scenario.write_text(json.dumps([["run", command], ["sleep", 0.2]]))
+        out = Path(self.tmp.name, "out")
+        r = subprocess.run(["bash", str(self.scripts / "capture.sh"), "--out-dir", str(out), "demo", str(scenario)],
+                           capture_output=True, text=True, timeout=90)
+        return r, sorted(p.name for p in out.glob("*")) if out.exists() else []
+
+    def test_clean_capture_keeps_all_three_files(self):
+        self.counting_engine(fail_from=99)
+        r, files = self.capture("echo hello")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(files, ["demo-still.svg", "demo.cast", "demo.svg"])
+
+    def test_a_secret_in_the_output_blocks_and_deletes_everything(self):
+        self.counting_engine(fail_from=99)
+        r, files = self.capture(f"python3 -c \"print('AKIA'+'{FAKE_AWS[4:]}')\"")
+        self.assertEqual(r.returncode, 10, r.stdout + r.stderr)
+        self.assertEqual(files, [])
+
+    def test_a_secret_hidden_in_an_osc_payload_blocks_and_deletes_everything(self):
+        self.counting_engine(fail_from=99)
+        r, files = self.capture(
+            f"python3 -c \"import sys;sys.stdout.write('\\x1b]0;'+'AKIA'+'{FAKE_AWS[4:]}'+'\\x07visible\\n')\"")
+        self.assertEqual(r.returncode, 10, r.stdout + r.stderr)
+        self.assertEqual(files, [])
+
+    def test_engine_failure_after_recording_deletes_the_unscanned_recording(self):
+        self.counting_engine(fail_from=2)  # scenario scan passes, recording scan fails
+        r, files = self.capture("echo hello")
+        self.assertEqual(r.returncode, 11, r.stdout + r.stderr)
+        self.assertEqual(files, [])
+        self.assertIn("could not complete", r.stderr)
+
+    def test_engine_failure_before_recording_records_nothing(self):
+        self.counting_engine(fail_from=1)
+        r, files = self.capture("echo hello")
+        self.assertEqual(r.returncode, 11, r.stdout + r.stderr)
+        self.assertEqual(files, [])
+
+    def test_blocking_finding_wins_over_engine_failure_and_is_reported(self):
+        self.counting_engine(fail_from=2)
+        r, files = self.capture(f"python3 -c \"print('AKIA'+'{FAKE_AWS[4:]}')\"")
+        self.assertEqual(r.returncode, 10, r.stdout + r.stderr)
+        self.assertIn("aws-access-key-id", r.stdout)
+        self.assertEqual(files, [])
+
+    def test_existing_artifacts_are_never_deleted_by_a_refused_run(self):
+        self.counting_engine(fail_from=99)
+        out = Path(self.tmp.name, "out")
+        out.mkdir()
+        Path(out, "demo.cast").write_text("precious")
+        r, files = self.capture("echo hello")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(Path(out, "demo.cast").read_text(), "precious")
+
+
+class Utf8StreamTests(unittest.TestCase):
+    def test_multibyte_characters_split_across_reads_are_preserved(self):
+        data = ("─" * 5 + "é漢😀").encode()
+        for cut in range(1, len(data)):
+            with self.subTest(cut=cut):
+                stream = pty_record.Utf8Stream()
+                text = stream.feed(data[:cut]) + stream.feed(data[cut:]) + stream.flush()
+                self.assertEqual(text, data.decode())
+
+    def test_genuinely_invalid_bytes_are_replaced_not_fatal(self):
+        stream = pty_record.Utf8Stream()
+        self.assertEqual(stream.feed(b"a\xffb") + stream.flush(), "a�b")
+
+    def test_a_truncated_character_at_the_end_is_flushed_as_a_replacement(self):
+        stream = pty_record.Utf8Stream()
+        self.assertEqual(stream.feed("é".encode()[:1]) + stream.flush(), "�")
+
+
+@unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "needs a POSIX pty and bash")
+class RecorderRobustnessTests(unittest.TestCase):
+    def record(self, d, steps, *args, timeout=40):
+        scenario, out = Path(d, "s.json"), Path(d, "t.cast")
+        scenario.write_text(json.dumps(steps))
+        r = subprocess.run([sys.executable, str(HERE / "scripts/pty_record.py"), "--out", str(out),
+                            "--scenario", str(scenario), *args], capture_output=True, text=True, timeout=timeout)
+        return r, out
+
+    def leftover(self, marker):
+        if not shutil.which("pgrep"):
+            self.skipTest("pgrep not available")
+        return subprocess.run(["pgrep", "-f", marker], capture_output=True, text=True).stdout.split()
+
+    def test_long_box_drawing_output_has_no_replacement_characters(self):
+        with tempfile.TemporaryDirectory() as d:
+            r, out = self.record(d, [["run", 'python3 -c "print(chr(0x2500)*60000)"'], ["sleep", 0.5]], "--cols", "200")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            text = "".join(json.loads(line)[2] for line in out.read_text().splitlines()[1:])
+            self.assertEqual((text.count("─"), text.count("�")), (60000, 0))
+
+    def test_a_foreground_program_that_ignores_sighup_cannot_hang_the_recorder(self):
+        marker = "271.5123"
+        with tempfile.TemporaryDirectory() as d:
+            r, out = self.record(d, [["run", f'trap "" HUP; sleep {marker}'], ["sleep", 0.3]])
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue(out.exists())
+        self.assertEqual(self.leftover(marker), [])
+
+    def test_exec_into_a_process_that_ignores_sighup_is_still_torn_down(self):
+        marker = "272.5123"
+        with tempfile.TemporaryDirectory() as d:
+            r, out = self.record(d, [["run", f"exec sh -c 'trap \"\" HUP; sleep {marker}'"], ["sleep", 0.3]])
+            self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.leftover(marker), [])
+
+    def test_a_background_job_that_ignores_sighup_is_torn_down_too(self):
+        marker = "273.5123"
+        with tempfile.TemporaryDirectory() as d:
+            r, out = self.record(d, [["run", f'(trap "" HUP; sleep {marker}) & sleep 1'], ["sleep", 0.3]])
+            self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.leftover(marker), [])
+
+    def test_a_failed_wait_also_tears_the_session_down(self):
+        marker = "274.5123"
+        with tempfile.TemporaryDirectory() as d:
+            r, out = self.record(d, [["run", f'trap "" HUP; sleep {marker}'], ["wait", "NEVER_APPEARS", 1]])
+            self.assertEqual(r.returncode, 3)
+        self.assertEqual(self.leftover(marker), [])
+
+
 class PackagingTests(unittest.TestCase):
     def test_pinned_versions_are_consistent_across_files(self):
         for installer, prefix in (("install_svgcast.sh", "SVGCAST"), ("install_betterleaks.sh", "BETTERLEAKS")):

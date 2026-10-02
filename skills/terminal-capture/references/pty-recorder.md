@@ -56,6 +56,8 @@ TUI example:
 
 Exit codes: `0` ok, `2` bad usage or scenario, `3` wait or overall timeout, `4` the shell exited before the scenario finished.
 
+Teardown is bounded: when the scenario ends (or fails) every process group in the shell's session, including the foreground program and background jobs, gets SIGHUP and then SIGKILL within a few seconds, so a program that ignores SIGHUP cannot hang the recorder or outlive it. Output is decoded incrementally, so multibyte characters split across reads (box-drawing, CJK, emoji) are preserved.
+
 ## Limits
 
 No Windows support (needs the POSIX `pty` module). The recording is real terminal output, so what a tool prints depends on it detecting a terminal of this size and on `TERM`. If an app disables color, set an `--env` variable the app documents for forcing it (such as `FORCE_COLOR=1`) rather than editing the scenario.
