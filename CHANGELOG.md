@@ -7,8 +7,13 @@ separately unless they carry `metadata.version` for their own breaking changes.
 ## [Unreleased]
 
 ### Added
-- `terminal-capture`: capture-only workflow for verified terminal screenshots and
-  recordings of CLI/TUI output with Charmbracelet VHS.
+- `terminal-capture`: capture-only workflow for verified terminal output. Produces
+  animated plus static SVG by default (scripted PTY recorder to asciicast v2, rendered
+  by svgcast built from source at a pinned, hash-checked version), with Charmbracelet
+  VHS as the fallback for PNG/GIF/MP4/WebM on request. Includes a secret scan before
+  and after recording (built-in rules plus a pinned, source-built Betterleaks engine, run
+  with hardened flags) that deletes artifacts and stops on credential-shaped content, a
+  scrubbed-environment recorder, and an SVG preview helper.
 - `brave-web`: `search.js --context` returns query-focused page passages through
   Brave's LLM Context endpoint (`--max-tokens`, `--threshold`); `BRAVE_SEARCH_API_KEY`
   is accepted as an alternative to `BRAVE_API_KEY`. Plain search snippets no longer

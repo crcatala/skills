@@ -64,3 +64,14 @@ Its software and documentation are not relicensed by this repository. Users
 fetching official documentation or installing the CLI must follow the applicable
 upstream terms. Sentry is a third-party product; this skill is not an official
 Sentry distribution.
+
+## terminal-capture
+
+The skill builds and runs external tools but does not bundle or relicense them.
+[svgcast](https://github.com/co2water/svgcast) (Apache-2.0) is compiled from
+source at a pinned version on the user's machine, as is
+[Betterleaks](https://github.com/betterleaks/betterleaks) (MIT), used as a second
+secret-scanning engine. [VHS](https://github.com/charmbracelet/vhs)
+(MIT), the fallback for PNG/GIF/video output, is installed separately by the user.
+The recorder, secret scanner, and preview helper in the skill are original to this
+repository.

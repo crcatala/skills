@@ -51,7 +51,7 @@ name is passed to the agent as extra instructions, in both harnesses:
 | [`ralph`](skills/ralph/SKILL.md) | Autonomous, ticket-native campaign delivery | `ralph`, `tk`, `gh`, node 22+ |
 | [`sentry`](skills/sentry/SKILL.md) | Read-only triage policy: access boundaries, evidence, privacy; syntax from CLI help/docs | `sentry` CLI |
 | [`ticket`](skills/ticket/SKILL.md) | The `tk` git-backed markdown issue tracker | `tk` |
-| [`terminal-capture`](skills/terminal-capture/SKILL.md) | Verified PNG/GIF/video captures of CLI and TUI output via Charmbracelet VHS | `vhs`, `ttyd`, `ffmpeg` |
+| [`terminal-capture`](skills/terminal-capture/SKILL.md) | Verified animated and still SVG captures of CLI/TUI output (svgcast, pinned and built from source), with two-engine secret scanning; VHS fallback for PNG/GIF/video | `go` 1.25+, python3; fallback: `vhs`, `ttyd`, `ffmpeg` |
 | [`vexor`](skills/vexor/SKILL.md) | Semantic file discovery by intent | `vexor` |
 | [`youtube-transcript-api`](skills/youtube-transcript-api/SKILL.md) | Public YouTube captions via Supadata | python3, `SUPADATA_API_KEY` |
 
