@@ -8,6 +8,8 @@ compatibility: "Needs Go >= 1.25 (builds the pinned svgcast and Betterleaks from
 
 Record a CLI or TUI in a controlled pseudo-terminal and save its rendered output as **SVG**: one animated file and one static still. This skill owns **capture only**: produce and verify local artifacts, then report their paths. Do not upload, post, or commit them unless separately asked.
 
+**The deliverable is SVG.** `NAME.svg` and `NAME-still.svg` are what you hand off, unchanged. Any PNG you make along the way (`preview.py` writes one) is a throwaway for looking at the result: never hand it off as the result, and never upload or attach it. Change the deliverable format only when the user explicitly asks for PNG, GIF, MP4 or WebM. If you think another format would suit the destination better, ask first; never switch silently.
+
 `{baseDir}` below means the directory containing this `SKILL.md`.
 
 ## Safety gate (read first, applies to every capture)
@@ -23,7 +25,9 @@ Full checklist, the stop-and-notify message, and what the scanner can't catch: [
 ## Choose the format
 
 - **Default: svgcast SVG.** Always produce both, unless told otherwise: `NAME.svg` (animated) and `NAME-still.svg` (static, the final frame).
-- **VHS fallback.** If the user explicitly asks for PNG, GIF, MP4 or WebM, or the destination cannot show animated SVG, follow [references/vhs.md](references/vhs.md) instead. The safety gate still applies. If the destination is unknown and matters (for example chat or email), say SVG may not animate there and offer PNG/GIF.
+- **Which one to embed.** Use `NAME.svg` when motion is the point: an interaction, a multi-step flow, a dialog opening, output streaming in. Use `NAME-still.svg` for a static view: a final state, a help screen, a table, a list. When unsure, embed the still, or both with a one-line caption each. Dense, constantly redrawing TUIs make large animated files, so prefer the still there.
+- **VHS fallback.** Only when the user explicitly asks for PNG, GIF, MP4 or WebM: follow [references/vhs.md](references/vhs.md) instead. The safety gate still applies. If you suspect the destination cannot show SVG (for example chat or email), do not switch on that suspicion: keep the SVG, say SVG may not animate there, and ask whether they want PNG/GIF. Say plainly that this is a guess, not something you checked.
+- **If a format fails** (render, preview, or a later upload), report the exact error and ask how to proceed. Do not convert to another format on your own.
 - Do not add extras (more states, window chrome, `--controls`) unless asked. `--controls` embeds a `<script>`; the default output has none.
 
 ## Requirements
@@ -45,7 +49,7 @@ Full checklist, the stop-and-notify message, and what the scanner can't catch: [
    ]
    ```
 
-   Steps: `type`, `run` (type then Enter), `key` (`Enter`, `Down`, `Esc`, `Ctrl+C`, or a literal like `j`), `sleep`, `wait` (regex, timeout seconds). Prefer `wait` on stable visible text over fixed sleeps. A failed `wait` fails the recording. Format and TUI examples: [references/pty-recorder.md](references/pty-recorder.md).
+   Steps: `type`, `run` (type then Enter), `key` (`Enter`, `Down`, `Esc`, `Ctrl+C`, or a literal like `j`; each is sent as one write, so arrow keys reach the app as a single escape sequence), `sleep`, `wait` (regex, timeout seconds). Prefer `wait` on stable visible text over fixed sleeps. A failed `wait` fails the recording. Format and TUI examples: [references/pty-recorder.md](references/pty-recorder.md).
 3. **End on the state you want to show.** The still is the **last frame**. For a TUI, finish while the target screen is visible; do not quit it (the recorder stops the process itself).
 4. **Run the pipeline.** One command records, scans, renders, and scans again:
 
@@ -53,10 +57,12 @@ Full checklist, the stop-and-notify message, and what the scanner can't catch: [
    {baseDir}/scripts/capture.sh --cols 100 --rows 30 NAME scenario.json
    ```
 
-   Useful options: `--out-dir DIR`, `--theme auto|light|dark`, `--cwd DIR`, `--env NAME=VALUE`, `--svgcast-args "--idle-time-limit 2s --speed 1.5"`. By default the output directory is a fresh `mktemp -d` under `$TMPDIR` or `/tmp`; use another location only if the user asks. Never overwrite existing artifacts without checking.
+   Useful options: `--out-dir DIR`, `--theme auto|light|dark`, `--cwd DIR`, `--env NAME=VALUE`, `--svgcast-args "--idle-time-limit 2s --speed 1.5"`. By default the output directory is a fresh `mktemp -d` under `$TMPDIR` or `/tmp`; use another location only if the user asks. Never overwrite existing artifacts without checking. `capture.sh` refuses to overwrite: to re-record a fixed scenario, use a fresh `--out-dir` (or omit it) or delete that run's old `NAME.cast`, `NAME.svg` and `NAME-still.svg` first.
 5. **Handle the exit code.** `10` means the scan blocked the capture and already deleted this run's artifacts: stop and notify the user (Safety gate step 3). `11` means the scan could not complete (for example the second engine failed): it did not pass, and the unscanned artifacts were deleted, so fix the scanner problem and re-run; never skip the scan. Other non-zero codes are tool failures: read the message, fix the scenario, and retry. Printed WARN lines (emails, IPs, home paths, high-entropy strings) do not stop the run: review each and report them in the handoff. If the artifact will be shared or committed, resolve them first.
-6. **Inspect the result yourself.** Open or rasterize it: `python3 {baseDir}/scripts/preview.py NAME-still.svg --out shot.png` (and `--at SECONDS` on the animated file to check a moment mid-animation), then view the PNG. Confirm the expected state is visible and legible, colors and styling look right, and nothing sensitive or unrelated is on screen. If it is wrong, adjust the scenario and re-record.
-7. **Hand off concisely.** State what was captured, the exact paths and sizes, any WARN findings, and caveats. Do not claim it was uploaded, attached, or committed unless a separate authorized step did that. When the request combines capture with posting, report the paths and a short suggested caption for that step.
+6. **Inspect the result yourself.** Rasterize it: `python3 {baseDir}/scripts/preview.py NAME-still.svg --out shot.png` (and `--at SECONDS` on the animated file to check a moment mid-animation), then view the PNG. **That PNG is for inspection only.** Keep it out of the handoff and out of any upload; the deliverable is still `NAME.svg` / `NAME-still.svg`. Confirm the expected state is visible and legible, colors and styling look right, and nothing sensitive or unrelated is on screen. If it is wrong, adjust the scenario and re-record.
+   - The window is sized to the SVG, so there is no grey margin; pass `--width`/`--height` only to override.
+   - If Chromium fails with "No usable sandbox", re-run with `PREVIEW_NO_SANDBOX=1` (local, trusted files only, which these are).
+7. **Hand off concisely.** State what was captured, the exact SVG paths and sizes, any WARN findings, and caveats. Do not claim it was uploaded, attached, or committed unless a separate authorized step did that. When the request combines capture with posting, pass the `NAME.svg` / `NAME-still.svg` paths (not preview PNGs) to that step, say which one suits embedding, and suggest a short caption. If the posting step has any reason to use a different format, that is a question for the user (see "If a format fails"), not something to do quietly.
 
 ## Facts that affect the output
 

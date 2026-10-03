@@ -165,12 +165,14 @@ class Recorder:
             self.events.append([round(time.time() - self.t0, 3), "o", text])
             self.since += strip_ansi(text)
 
-    def send(self, text, delay):
+    def send(self, text, delay, atomic=False):
+        """Type text. Per-character by default; atomic=True writes it as one chunk, which keeps
+        an escape sequence (arrow keys, Home, PageUp...) together so the app does not read a bare Esc."""
         self.since = ""
-        for ch in text:
+        for chunk in ([text] if atomic else text):
             if not self.alive:
                 return
-            os.write(self.fd, ch.encode())
+            os.write(self.fd, chunk.encode())
             self.pump(delay)
 
     def run_step(self, step):
@@ -181,7 +183,7 @@ class Recorder:
             self.send(step[1], self.type_delay)
             self.send("\r", 0.05)
         elif op == "key":
-            self.send(key_bytes(step[1]), 0.05)
+            self.send(key_bytes(step[1]), 0.05, atomic=True)
         elif op == "sleep":
             self.pump(float(step[1]))
         elif op == "wait":

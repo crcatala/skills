@@ -157,6 +157,23 @@ class RecordTests(unittest.TestCase):
             self.assertIn("hello-from-pty", text)
             self.assertEqual(stat.S_IMODE(out.stat().st_mode), 0o600)
 
+    def test_named_keys_reach_the_app_as_one_write(self):
+        # An arrow key sent byte by byte looks like a bare Esc to a raw-input TUI.
+        reader = ("import os,select,sys,termios,tty,time;tty.setraw(0);time.sleep(0.3);o=[];e=time.time()+1.2\n"
+                  "while time.time()<e:\n"
+                  "    if select.select([0],[],[],0.1)[0]: o.append(os.read(0,64))\n"
+                  "sys.stdout.write('CHUNKS='+repr(o)+'\\r\\n')")
+        with tempfile.TemporaryDirectory() as d:
+            script = Path(d, "reader.py")
+            script.write_text(reader)
+            steps = Path(d, "s.json")
+            steps.write_text(json.dumps([["run", f"python3 {script}"], ["sleep", 0.6], ["key", "Down"],
+                                         ["sleep", 0.2], ["key", "Up"], ["wait", "CHUNKS=.*\\]", 5]]))
+            r, out = self.record(d, "--scenario", str(steps), "--cols", "100", "--rows", "10")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            text = pty_record.strip_ansi("".join(json.loads(line)[2] for line in out.read_text().splitlines()[1:]))
+            self.assertIn(r"[b'\x1b[B', b'\x1b[A']", text)
+
     def test_recorded_shell_does_not_inherit_host_secrets(self):
         with tempfile.TemporaryDirectory() as d:
             r, out = self.record(d, "--run", "env", "--wait", "PS1", env_extra={"TC_HOST_API_TOKEN": "leaky-value-123"})

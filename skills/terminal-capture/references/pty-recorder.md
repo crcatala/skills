@@ -19,11 +19,13 @@ A JSON list of steps:
 |---|---|
 | `["type", "text"]` | type characters one at a time (`--type-delay`, default 0.04 s) |
 | `["run", "cmd"]` | type `cmd`, then Enter |
-| `["key", "Down"]` | named key: `Enter Tab Esc Space Backspace Delete Up Down Left Right Home End PageUp PageDown`, `Ctrl+<letter>`; any other string is sent literally (`"j"`, `"?"`) |
+| `["key", "Down"]` | named key: `Enter Tab Esc Space Backspace Delete Up Down Left Right Home End PageUp PageDown`, `Ctrl+<letter>`; any other string is sent literally (`"j"`, `"?"`). The whole key is written in one `write()`, so `Down` reaches the app as one `\x1b[B`, not as Esc, `[`, `B`. |
 | `["sleep", 1.5]` | let output arrive/settle for N seconds |
 | `["wait", "regex", 10]` | wait up to N seconds (default 10) for the regex to match ANSI-stripped output produced since the last `type`/`run`/`key`. A timeout fails the recording (exit 3). |
 
-To type the word "Enter" use `["type", "Enter"]`.
+To type the word "Enter" use `["type", "Enter"]`. Use `type`, not `key`, for text you want typed character by character (a multi-character string given to `key` is also sent as one write).
+
+Why keys are atomic: an app that reads raw input (pi-tui and other TUI frameworks) treats a lone `\x1b` followed by a pause as the Escape key. Sending `\x1b[B` byte by byte makes `Down` look like Esc then `[B`, which can close a dialog or open a quit prompt. If an older copy of this recorder is in use, prefer single-byte keys (`j`/`k`, `Tab`, a letter shortcut) over arrows.
 
 ## Writing good scenarios
 
@@ -46,6 +48,22 @@ TUI example:
   ["sleep", 1.5]
 ]
 ```
+
+## Seeding a TUI with fake data
+
+Every capture runs with an empty `HOME` and a scrubbed environment, so the app starts with no config, no history and no accounts. Point it at synthetic fixtures with `--env` and `--cwd`. Which variables work is app-specific (check its docs): common ones are `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `<APP>_HOME` or `<APP>_CONFIG_DIR`, and a flag or variable that disables telemetry and update checks.
+
+```bash
+fx="$(mktemp -d)"; mkdir -p "$fx/config" "$fx/data"
+cat > "$fx/data/projects.json" <<'EOF'
+[{"name": "demo-app", "status": "passing"}, {"name": "sample-api", "status": "failing"}]
+EOF
+{baseDir}/scripts/capture.sh --cwd "$fx" \
+  --env XDG_CONFIG_HOME="$fx/config" --env XDG_DATA_HOME="$fx/data" \
+  --env MYAPP_NO_TELEMETRY=1 NAME scenario.json
+```
+
+Keep the fixtures obviously fake (`demo-app`, `sample-api`, `user@example.com`, `EXAMPLE` values). Do not plant fake-but-realistic secrets (a key-shaped token, a plausible JWT, `AKIA...`): the scanner will block them, and a reader cannot tell them from real ones. The scan sees only what is recorded and rendered, not the fixture files themselves, so look at what ends up on screen.
 
 ## Environment and safety
 
