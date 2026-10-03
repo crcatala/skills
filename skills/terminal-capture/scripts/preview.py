@@ -4,7 +4,10 @@
 A CSS-animated SVG has no single "image", so this inlines it in a page, pauses
 every animation at --at seconds, and screenshots it with a headless Chromium/Chrome.
 
-  preview.py demo.svg --at 3.5 --out /tmp/demo-3.5s.png [--width 1200 --height 800]
+  preview.py demo.svg --at 3.5 --out /tmp/demo-3.5s.png [--width W --height H]
+
+The PNG is a throwaway for looking at the result. It is never the deliverable and must not be
+uploaded or attached; the deliverable stays the .svg files.
 
 Notes:
   * theme "auto" SVGs render in light mode; render with --theme dark to check dark.
@@ -13,7 +16,9 @@ Notes:
     PREVIEW_NO_SANDBOX=1 for this local, trusted-file preview only.
 """
 import argparse
+import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,8 +32,8 @@ def main(argv=None):
     p.add_argument("svg")
     p.add_argument("--at", type=float, default=0.0, help="seconds into the animation")
     p.add_argument("--out", required=True, help="output .png")
-    p.add_argument("--width", type=int, default=1200)
-    p.add_argument("--height", type=int, default=800)
+    p.add_argument("--width", type=int, help="window width (default: the SVG's own width)")
+    p.add_argument("--height", type=int, help="window height (default: the SVG's own height)")
     a = p.parse_args(argv)
 
     browser = next((b for b in map(shutil.which, BROWSERS) if b), None)
@@ -37,6 +42,13 @@ def main(argv=None):
         return 1
     with open(a.svg, encoding="utf-8") as f:
         svg = f.read()
+    width, height = a.width, a.height
+    root = re.search(r"<svg\b[^>]*>", svg)
+    dims = [root and re.search(rf'\s{k}="([0-9.]+)(?:px)?"', root.group(0)) for k in ("width", "height")]
+    if all(dims):  # fit the window to the SVG so no grey strip is left around it
+        width = width or math.ceil(float(dims[0].group(1)))
+        height = height or math.ceil(float(dims[1].group(1)))
+    width, height = width or 1200, height or 800
     page = (
         '<!doctype html><meta charset="utf-8"><body style="margin:0;background:#808080">'
         + svg
@@ -48,7 +60,7 @@ def main(argv=None):
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(page)
         cmd = [browser, "--headless", "--disable-gpu", "--hide-scrollbars",
-               f"--window-size={a.width},{a.height}", "--virtual-time-budget=1500",
+               f"--window-size={width},{height}", "--virtual-time-budget=1500",
                f"--screenshot={os.path.abspath(a.out)}", "file://" + html_path]
         if os.environ.get("PREVIEW_NO_SANDBOX") == "1":
             cmd.insert(2, "--no-sandbox")

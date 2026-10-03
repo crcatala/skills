@@ -14,6 +14,13 @@ separately unless they carry `metadata.version` for their own breaking changes.
   and after recording (built-in rules plus a pinned, source-built Betterleaks engine, run
   with hardened flags) that deletes artifacts and stops on credential-shaped content, a
   scrubbed-environment recorder, and an SVG preview helper.
+- `terminal-capture`, `github-pr-screenshots`: the SVG deliverables stay SVG through upload.
+  `preview.py` PNGs are documented as inspection-only, format changes need an explicit user
+  request, and SVG is documented as uploadable as-is with `gh attach`. Added animated-vs-still
+  guidance and a private-repo embed check.
+- `terminal-capture`: the recorder sends each `key` step as one write, so arrow keys, Home/End and
+  Page keys arrive as a single escape sequence instead of being read as a bare Esc; `preview.py`
+  sizes its window to the SVG; documented fixture seeding and the no-overwrite rule.
 - `brave-web`: `search.js --context` returns query-focused page passages through
   Brave's LLM Context endpoint (`--max-tokens`, `--threshold`); `BRAVE_SEARCH_API_KEY`
   is accepted as an alternative to `BRAVE_API_KEY`. Plain search snippets no longer

@@ -1,6 +1,6 @@
 # VHS fallback: PNG, GIF, MP4, WebM
 
-Use this path only when the user explicitly asks for a raster or video format (PNG, GIF, MP4, WebM), or the destination cannot show animated SVG. Otherwise use the default svgcast SVG workflow in `SKILL.md`.
+Use this path only when the user explicitly asks for a raster or video format (PNG, GIF, MP4, WebM). A suspicion that the destination cannot show animated SVG is not enough: keep the SVG and ask first (see "Choose the format" in `SKILL.md`). Otherwise use the default svgcast SVG workflow in `SKILL.md`.
 
 The **safety gate applies unchanged**: decide what will be on screen first, use mock data, scan before sharing, stop and notify on any significant risk (see [safety.md](safety.md)). VHS has no built-in scanner. Scan your tape with `scripts/scan_secrets.py` before running it, and inspect the final image or video by eye; the scanner can read the tape but not a PNG or GIF, so there is no after-the-fact text check. Use the `Hide`/`Show` commands for setup only when the setup itself is safe.
 
