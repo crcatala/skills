@@ -9,6 +9,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
 
 import apply_icon  # noqa: E402
+import build_examples  # noqa: E402
 import gallery  # noqa: E402
 import icon_paths  # noqa: E402
 import scan  # noqa: E402
@@ -258,6 +259,39 @@ class ApplyIconTests(unittest.TestCase):
         self.assertEqual(self.run_apply("--source", self.source(), "--no-readme"), 0)
         with open(os.path.join(self.repo, "README.md")) as fh:
             self.assertEqual(fh.read(), "# Demo\n")
+
+
+class StyleExampleTests(unittest.TestCase):
+    def test_every_menu_style_has_a_template_with_a_subject_slot(self):
+        styles = build_examples.load_styles()
+        self.assertEqual(len(styles), 9)
+        self.assertEqual(sum(s["id"].startswith("pixel-") for s in styles), 3)
+        for s in styles:
+            self.assertIn("{subject}", s["template"], s["id"])
+            self.assertIn("transparent background", s["template"], s["id"])
+
+    def test_prompts_fill_the_template_verbatim(self):
+        styles, apps = build_examples.load_styles(), build_examples.load_apps()
+        items = build_examples.prompts(styles, apps)
+        self.assertEqual(len(items), len(styles) * len(apps))
+        first = items[0]
+        self.assertEqual(first["prompt"], styles[0]["template"].replace("{subject}", apps[0]["subject"]))
+        self.assertNotIn("{subject}", "".join(i["prompt"] for i in items))
+
+    def test_example_sheet_is_complete_and_current(self):
+        styles, apps = build_examples.load_styles(), build_examples.load_apps()
+        files = set(os.listdir(build_examples.EXAMPLES_DIR))
+        expected = {f"{a['id']}-{s['id']}.webp" for a in apps for s in styles}
+        self.assertEqual(expected - files, set(), "regenerate missing examples with scripts/build_examples.py")
+        with open(os.path.join(build_examples.EXAMPLES_DIR, "index.html"), encoding="utf-8") as fh:
+            page = fh.read()
+        self.assertEqual(page, build_examples.render_html(styles, apps, files), "rebuild index.html")
+
+    def test_missing_image_shows_a_placeholder(self):
+        styles, apps = build_examples.load_styles(), build_examples.load_apps()
+        page = build_examples.render_html(styles, apps, set())
+        self.assertIn("not generated", page)
+        self.assertNotIn("{{", page)
 
 
 class GalleryTests(unittest.TestCase):

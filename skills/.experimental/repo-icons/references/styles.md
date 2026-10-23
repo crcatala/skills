@@ -3,6 +3,11 @@
 Stock prompt templates for repository icons. Show the user the menu (ID, name,
 one-line look), let them pick one or more, then fill `{subject}` per repository.
 
+Example results for every template, on three hypothetical apps, are in
+`examples/index.html` (images `examples/<app>-<style-id>.webp`). After changing a
+template, regenerate its examples: the skill's `scripts/build_examples.py` prints the
+prompts and rebuilds the sheet.
+
 Every template already asks for a centered, isolated subject on a transparent
 background with no text. Always also request a transparent background through
 the image tool's own option, not just the prompt.
