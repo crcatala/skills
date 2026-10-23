@@ -1,0 +1,26 @@
+{
+  "note": "Hypothetical apps used to show what each style template produces. One subject per app, reused across every style.",
+  "apps": [
+    {
+      "id": "harvest-ledger",
+      "name": "Harvest Ledger",
+      "industry": "Agriculture",
+      "description": "Harvest and produce tracking for small farms",
+      "subject": "a green seedling sprouting from an open ledger book, with a small ripe tomato resting on the pages"
+    },
+    {
+      "id": "pulsecare",
+      "name": "PulseCare",
+      "industry": "Healthcare",
+      "description": "Clinic appointments and patient vitals",
+      "subject": "a rounded red heart with a white medical cross in its center and a stethoscope looped around it"
+    },
+    {
+      "id": "tidewater-freight",
+      "name": "Tidewater Freight",
+      "industry": "Logistics",
+      "description": "Container shipping and route tracking",
+      "subject": "a small cargo ship carrying a stack of colorful shipping containers, riding a single curling ocean wave"
+    }
+  ]
+}

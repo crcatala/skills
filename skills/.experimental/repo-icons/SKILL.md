@@ -88,6 +88,13 @@ Read `references/styles.md` and show its menu (ID, name, one-line look). Ask
 which styles to generate: the same set for every repository, or per repository.
 Suggest two or three to keep the review page manageable.
 
+Offer the example sheet so the user can see each style before choosing:
+`references/examples/index.html` shows every template applied to three
+hypothetical apps. Give its full path and open or display it however this
+harness allows (it is a static page; its images sit next to it as
+`<app>-<style-id>.webp`). The images can also be shown one at a time, for
+example all of one style, when a full page is not practical.
+
 **Stop** for the user's choice.
 
 ## 4. Recap and confirm
