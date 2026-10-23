@@ -89,11 +89,11 @@ which styles to generate: the same set for every repository, or per repository.
 Suggest two or three to keep the review page manageable.
 
 Offer the example sheet so the user can see each style before choosing:
-`references/examples/index.html` shows every template applied to three
-hypothetical apps. Give its full path and open or display it however this
-harness allows (it is a static page; its images sit next to it as
-`<app>-<style-id>.webp`). The images can also be shown one at a time, for
-example all of one style, when a full page is not practical.
+`references/examples/README.md` shows every template applied to three
+hypothetical apps, with the images next to it as `<app>-<style-id>.webp`.
+Give its full path and the matching GitHub link if the skill came from a
+GitHub repository, where the page renders with images on desktop and mobile.
+Images can also be shown one at a time, for example all of one style.
 
 **Stop** for the user's choice.
 

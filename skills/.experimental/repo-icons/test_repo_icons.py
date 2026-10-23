@@ -283,15 +283,15 @@ class StyleExampleTests(unittest.TestCase):
         files = set(os.listdir(build_examples.EXAMPLES_DIR))
         expected = {f"{a['id']}-{s['id']}.webp" for a in apps for s in styles}
         self.assertEqual(expected - files, set(), "regenerate missing examples with scripts/build_examples.py")
-        with open(os.path.join(build_examples.EXAMPLES_DIR, "index.html"), encoding="utf-8") as fh:
+        with open(os.path.join(build_examples.EXAMPLES_DIR, "README.md"), encoding="utf-8") as fh:
             page = fh.read()
-        self.assertEqual(page, build_examples.render_html(styles, apps, files), "rebuild index.html")
+        self.assertEqual(page, build_examples.render_markdown(styles, apps, files), "rebuild README.md")
 
     def test_missing_image_shows_a_placeholder(self):
         styles, apps = build_examples.load_styles(), build_examples.load_apps()
-        page = build_examples.render_html(styles, apps, set())
-        self.assertIn("not generated", page)
-        self.assertNotIn("{{", page)
+        page = build_examples.render_markdown(styles, apps, set())
+        self.assertIn("_not generated_", page)
+        self.assertNotIn("<img", page)
 
 
 class GalleryTests(unittest.TestCase):
