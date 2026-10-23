@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run every test in the repository:
 #   - tests/*.sh                      repository-level content checks
-#   - skills/*/test_*.py              Python unit tests bundled with a skill (stdlib unittest, run via uv)
+#   - skills/*/test_*.py              Python unit tests bundled with a skill (stdlib unittest, run via uv);
+#                                     experimental skills under skills/.experimental/ included
 #   - skills/brave-web/test/*.test.js Node tests (installs deps from the lockfile if missing)
 set -euo pipefail
 
@@ -18,10 +19,11 @@ done
 python_test_deps() {
     case "$1" in
         skills/grok-research) echo "pydantic" ;;
+        skills/.experimental/repo-icons) echo "pillow" ;;
     esac
 }
 
-for dir in skills/*/; do
+for dir in skills/*/ skills/.experimental/*/; do
     if compgen -G "$dir/test_*.py" >/dev/null; then
         echo "• ${dir%/} (python unittest)"
         with_args=()
