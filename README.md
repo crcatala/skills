@@ -1,4 +1,4 @@
-# skills
+<h1><img src="assets/icon.png" width="40" height="40" align="top" alt="" /> skills</h1>
 
 Personal [Agent Skills](https://agentskills.io/specification) for coding agents
 (Claude Code, pi, and any other harness that implements the spec).
