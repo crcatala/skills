@@ -9,6 +9,7 @@ itself has no repository icon; the README header image is a separate, purely
 visual convention.
 """
 
+import json
 import re
 
 # Checked in order; the first existing file wins.
@@ -52,8 +53,6 @@ ICON_SOURCE_FILES = (
 
 # Repo-level override, checked before the well-known paths.
 PROJECT_FILE = "t3.json"
-
-IMAGE_EXTENSIONS = (".svg", ".png", ".ico", ".icns", ".webp", ".jpg", ".jpeg", ".gif", ".avif")
 
 _LINK_ICON_RE = re.compile(
     r"<link\b(?=[^>]*\brel=[\"'](?:icon|shortcut icon)[\"'])(?=[^>]*\bhref=[\"']([^\"'?]+))[^>]*>",
@@ -107,12 +106,34 @@ def find_well_known(paths):
     return None
 
 
-def shadowing_paths(paths, target):
-    """Well-known paths that exist and would be picked before `target`."""
-    if target not in WELL_KNOWN_ICON_PATHS:
-        return []
-    earlier = WELL_KNOWN_ICON_PATHS[: WELL_KNOWN_ICON_PATHS.index(target)]
-    return [p for p in earlier if p in paths]
+def t3_json_icon(paths, read_file):
+    """(iconPath, problem) from t3.json. iconPath is None unless it names an existing file."""
+    if PROJECT_FILE not in paths:
+        return None, None
+    try:
+        icon_path = (json.loads(read_file(PROJECT_FILE) or "{}") or {}).get("iconPath")
+    except (ValueError, AttributeError):
+        return None, "t3.json does not parse"
+    if isinstance(icon_path, str) and icon_path.strip() in paths:
+        return icon_path.strip(), None
+    return None, None
+
+
+def shadowing_paths(paths, target, read_file=None):
+    """Existing icons that tools would pick before `target`.
+
+    Includes a t3.json iconPath (checked before every well-known path) when
+    read_file is given, then well-known paths earlier in the lookup order.
+    """
+    found = []
+    if read_file is not None:
+        override, _ = t3_json_icon(paths, read_file)
+        if override and override != target:
+            found.append(f"t3.json iconPath ({override})")
+    if target in WELL_KNOWN_ICON_PATHS:
+        earlier = WELL_KNOWN_ICON_PATHS[: WELL_KNOWN_ICON_PATHS.index(target)]
+        found += [p for p in earlier if p in paths]
+    return found
 
 
 def logo_like(paths, exclude=(), limit=5):
@@ -146,16 +167,11 @@ def classify(paths, read_file):
     paths = set(paths)
     result = {"status": "none", "icon": None, "via": None, "note": None, "logos": []}
 
-    if PROJECT_FILE in paths:
-        import json
-
-        try:
-            icon_path = (json.loads(read_file(PROJECT_FILE) or "{}") or {}).get("iconPath")
-        except (ValueError, AttributeError):
-            icon_path = None
-            result["note"] = "t3.json does not parse"
-        if icon_path and icon_path.strip() in paths:
-            result.update(status="ok", icon=icon_path.strip(), via="t3.json")
+    override, problem = t3_json_icon(paths, read_file)
+    if override:
+        result.update(status="ok", icon=override, via="t3.json")
+    elif problem:
+        result["note"] = problem
 
     if result["status"] != "ok":
         found = find_well_known(paths)

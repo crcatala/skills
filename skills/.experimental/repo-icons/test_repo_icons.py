@@ -64,6 +64,20 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(icon_paths.shadowing_paths(paths, "assets/icon.png"), ["favicon.ico"])
         self.assertEqual(icon_paths.shadowing_paths(paths, "favicon.ico"), [])
 
+    def test_t3_json_icon_path_shadows_a_new_icon(self):
+        files = {"t3.json": json.dumps({"iconPath": "site/logo.svg"})}
+        paths = {"t3.json", "site/logo.svg"}
+        self.assertEqual(
+            icon_paths.shadowing_paths(paths, "assets/icon.png", files.get), ["t3.json iconPath (site/logo.svg)"]
+        )
+        # pointing t3.json at the new icon itself is fine
+        files = {"t3.json": json.dumps({"iconPath": "assets/icon.png"})}
+        self.assertEqual(icon_paths.shadowing_paths(paths | {"assets/icon.png"}, "assets/icon.png", files.get), [])
+
+    def test_unparseable_t3_json_is_noted(self):
+        result = icon_paths.classify({"t3.json"}, {"t3.json": "{nope"}.get)
+        self.assertIn("does not parse", result["note"])
+
     def test_object_literal_icon_link(self):
         src = "links: [{ rel: 'stylesheet', href: '/app.css' }, { rel: 'icon', href: '/favicon.png' }]"
         self.assertEqual(icon_paths.extract_icon_href(src), "/favicon.png")
@@ -84,6 +98,14 @@ class RecentSourcesTests(unittest.TestCase):
             self.repo("o/stale", "2000-01-01T00:00:00Z"),
         ]
         self.assertEqual([r["nameWithOwner"] for r in scan.recent_sources(repos, 30)], ["o/keep"])
+
+
+class InspectTests(unittest.TestCase):
+    def test_empty_repo_is_reported_not_raised(self):
+        row = scan.inspect({"nameWithOwner": "o/empty", "pushedAt": None, "defaultBranchRef": None})
+        self.assertEqual(row["status"], "error")
+        self.assertIn("empty repository", row["error"])
+        self.assertIn("empty repository", scan.render_table([row]))
 
 
 class ReadmeTests(unittest.TestCase):
@@ -117,8 +139,37 @@ class ReadmeTests(unittest.TestCase):
         self.assertIn("# not a title", text)
         self.assertIn(f"<h1>{self.IMG} Real</h1>", text)
 
+    def test_multiline_h1_with_image_is_left_alone_and_later_h1_untouched(self):
+        original = '<h1 align="center">\n  <img src="logo.png" width="80"><br>\n  Tool\n</h1>\n\nIntro\n\n# Install\n'
+        text, status = apply_icon.update_readme_text(original, "assets/icon.png")
+        self.assertEqual(text, original)
+        self.assertIn("already", status)
+
+    def test_multiline_h1_without_image_gets_one(self):
+        original = '<h1 align="center">\n  Tool\n</h1>\n'
+        text, status = apply_icon.update_readme_text(original, "assets/icon.png")
+        self.assertEqual(status, "updated")
+        self.assertEqual(text.splitlines()[0], f'<h1 align="center">{self.IMG}')
+        self.assertEqual(text.splitlines()[1:], ["  Tool", "</h1>"])
+
+    def test_setext_title_is_converted(self):
+        text, status = apply_icon.update_readme_text("My Tool\n=======\n\ntext\n", "assets/icon.png")
+        self.assertEqual(status, "updated")
+        self.assertEqual(text, f"<h1>{self.IMG} My Tool</h1>\n\ntext\n")
+
+    def test_only_the_first_heading_counts(self):
+        original = "## Overview\n\n# Later\n"
+        text, status = apply_icon.update_readme_text(original, "assets/icon.png")
+        self.assertEqual(text, original)
+        self.assertIn("first heading", status)
+
+    def test_badges_before_title_are_skipped(self):
+        original = "[![CI](https://x/badge.svg)](https://x)\n\n# Tool\n"
+        text, _ = apply_icon.update_readme_text(original, "assets/icon.png")
+        self.assertIn(f"<h1>{self.IMG} Tool</h1>", text)
+
     def test_no_title(self):
-        _, status = apply_icon.update_readme_text("Just text\n\n## Section\n", "assets/icon.png")
+        _, status = apply_icon.update_readme_text("Just text\n\nMore text\n", "assets/icon.png")
         self.assertIn("no top-level title", status)
 
 
@@ -175,6 +226,38 @@ class ApplyIconTests(unittest.TestCase):
         self.assertEqual(self.run_apply("--source", self.source(), "--force"), 0)
         self.assertFalse(os.path.exists(os.path.join(self.repo, "assets/icon.svg")))
         self.assertTrue(os.path.exists(os.path.join(self.repo, "assets/icon.png")))
+
+
+    def assert_nothing_written(self, readme="# Demo\n"):
+        self.assertFalse(os.path.exists(os.path.join(self.repo, "assets")))
+        with open(os.path.join(self.repo, "README.md"), "rb") as fh:
+            self.assertEqual(fh.read(), readme.encode() if isinstance(readme, str) else readme)
+
+    def test_t3_json_override_blocks_unless_allowed(self):
+        os.makedirs(os.path.join(self.repo, "site"))
+        open(os.path.join(self.repo, "site/logo.svg"), "w").close()
+        with open(os.path.join(self.repo, "t3.json"), "w") as fh:
+            json.dump({"iconPath": "site/logo.svg"}, fh)
+        self.assertEqual(self.run_apply("--source", self.source()), 1)
+        self.assert_nothing_written()
+        self.assertEqual(self.run_apply("--source", self.source(), "--allow-shadowed"), 0)
+
+    def test_earlier_favicon_blocks(self):
+        open(os.path.join(self.repo, "favicon.ico"), "w").close()
+        self.assertEqual(self.run_apply("--source", self.source()), 1)
+        self.assert_nothing_written()
+
+    def test_unreadable_readme_writes_nothing(self):
+        raw = b"# Caf\xe9\n"
+        with open(os.path.join(self.repo, "README.md"), "wb") as fh:
+            fh.write(raw)
+        self.assertEqual(self.run_apply("--source", self.source()), 1)
+        self.assert_nothing_written(raw)
+
+    def test_no_readme_flag_leaves_readme(self):
+        self.assertEqual(self.run_apply("--source", self.source(), "--no-readme"), 0)
+        with open(os.path.join(self.repo, "README.md")) as fh:
+            self.assertEqual(fh.read(), "# Demo\n")
 
 
 class GalleryTests(unittest.TestCase):

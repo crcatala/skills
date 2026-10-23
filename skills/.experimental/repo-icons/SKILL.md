@@ -127,7 +127,7 @@ subject and generate one square image per (repository, style): at least
 Write `<workdir>/manifest.json` as described at the top of
 `scripts/gallery.py`, with one entry per repository: its candidates and, when
 reusing or keeping, the existing logo as `current` (download it with
-`gh api repos/OWNER/NAME/contents/PATH --jq .content | base64 -d > FILE` when
+`gh api repos/OWNER/NAME/contents/PATH -H "Accept: application/vnd.github.raw" > FILE` when
 it is not on disk). Then:
 
 ```bash
@@ -150,7 +150,8 @@ owner/other: redo | note: warmer colors
 owner/third: keep
 ```
 
-`skip` and missing repositories are left alone. For `redo`, generate new
+`skip`, `undecided` (a note without a pick) and missing repositories are left
+alone; for `undecided`, ask what the user wants. For `redo`, generate new
 concepts using the note, rebuild the page with only those repositories, and
 **Stop** again. Do not apply anything for a repository until its pick is final.
 
@@ -170,10 +171,17 @@ checkout of it:
    copies SVGs unchanged, removes a faint translucent backdrop if the model
    painted one, and changes the README's first heading to
    `<h1><img src="assets/icon.png" width="40" height="40" align="top" alt="" /> Title</h1>`.
-   A title that already shows an image is left alone. Read its JSON output:
-   if it reports an error (an existing `assets/icon.*`) or a shadowing path
-   checked before the new icon, tell the user and ask before passing `--force`
-   or changing anything else.
+   A title that already shows an image is left alone. Everything is checked
+   before anything is written; on exit code 1 nothing was written, and the
+   JSON `error` says why:
+   - an existing `assets/icon.*`: ask before passing `--force`;
+   - `shadowed_by` is not empty: another icon (a `t3.json` `iconPath`, or a
+     favicon checked earlier) would still be shown instead. Tell the user and
+     ask whether to remove or update that file, or keep it and pass
+     `--allow-shadowed`;
+   - an unreadable README: report it and skip the repository.
+   Also report the `readme` status when it is not `updated`, so the user can
+   edit an unusual title by hand.
 3. Check the repository's own conventions (commit style, a Prettier or
    Markdown lint that covers `README.md`) and run any quick check that covers
    the changed files.

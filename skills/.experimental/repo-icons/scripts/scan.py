@@ -32,8 +32,14 @@ class GhError(RuntimeError):
     pass
 
 
+GH_TIMEOUT = 60  # seconds per gh call
+
+
 def gh(*args):
-    proc = subprocess.run(["gh", *args], capture_output=True, text=True)
+    try:
+        proc = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=GH_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise GhError(f"gh {' '.join(args)} timed out after {GH_TIMEOUT}s")
     if proc.returncode != 0:
         raise GhError(proc.stderr.strip() or f"gh {' '.join(args)} failed")
     return proc.stdout
@@ -108,14 +114,21 @@ def readme_header_image(name):
 
 def inspect(repo):
     name = repo["nameWithOwner"]
-    branch = repo["defaultBranchRef"]["name"]
+    branch = (repo.get("defaultBranchRef") or {}).get("name")
     out = {
         "repo": name,
         "description": repo.get("description") or "",
-        "pushed_at": repo["pushedAt"][:10],
+        "pushed_at": (repo.get("pushedAt") or "")[:10],
         "private": repo.get("isPrivate", False),
         "default_branch": branch,
+        "icon": None,
+        "via": None,
+        "note": None,
+        "logos": [],
     }
+    if not branch:
+        out.update(status="error", error="empty repository (no default branch)")
+        return out
     try:
         tree = gh_json("api", f"repos/{name}/git/trees/{branch}?recursive=1")
     except GhError as exc:
