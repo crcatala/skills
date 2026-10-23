@@ -115,9 +115,7 @@ def render_markdown(styles, apps, available):
             "",
             "<details><summary>Prompt template</summary>",
             "",
-            "```text",
-            s["template"],
-            "```",
+            "> " + s["template"],
             "",
             "</details>",
         ]

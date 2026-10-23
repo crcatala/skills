@@ -31,9 +31,7 @@ NES-era sprite: chunky pixels, 3–4 colors, bold black outline
 
 <details><summary>Prompt template</summary>
 
-```text
-Retro 8-bit pixel art sprite of {subject}, in the style of an NES-era item pickup. Very coarse grid (about 16x16 sprite scaled up), crisp hard-edged square pixels, no anti-aliasing, a limited palette of 3 to 4 bold colors plus a thick black outline, flat shading. Centered single isolated object, transparent background, no text, no letters.
-```
+> Retro 8-bit pixel art sprite of {subject}, in the style of an NES-era item pickup. Very coarse grid (about 16x16 sprite scaled up), crisp hard-edged square pixels, no anti-aliasing, a limited palette of 3 to 4 bold colors plus a thick black outline, flat shading. Centered single isolated object, transparent background, no text, no letters.
 
 </details>
 
@@ -49,9 +47,7 @@ SNES/GBA RPG inventory item: richer palette, highlights, dark outline
 
 <details><summary>Prompt template</summary>
 
-```text
-Retro 16-bit pixel art icon of {subject}, like an inventory item in a SNES or Game Boy Advance RPG. Crisp hard-edged pixels on a coarse grid (about 32x32 sprite scaled up), limited vibrant palette with highlight and shadow tones, dark 1-pixel outline. Centered single isolated object, transparent background, no text, no letters.
-```
+> Retro 16-bit pixel art icon of {subject}, like an inventory item in a SNES or Game Boy Advance RPG. Crisp hard-edged pixels on a coarse grid (about 32x32 sprite scaled up), limited vibrant palette with highlight and shadow tones, dark 1-pixel outline. Centered single isolated object, transparent background, no text, no letters.
 
 </details>
 
@@ -67,9 +63,7 @@ Modern indie pixel art: finer grid, soft shading, glow accents
 
 <details><summary>Prompt template</summary>
 
-```text
-Modern high-detail pixel art icon of {subject}, in the style of a contemporary indie game (fine 64x64 pixel grid). Clean pixel clusters, soft dithered shading, a few glowing accent pixels, subtle rim light, no blur. Centered single isolated object, transparent background, no text, no letters.
-```
+> Modern high-detail pixel art icon of {subject}, in the style of a contemporary indie game (fine 64x64 pixel grid). Clean pixel clusters, soft dithered shading, a few glowing accent pixels, subtle rim light, no blur. Centered single isolated object, transparent background, no text, no letters.
 
 </details>
 
@@ -85,9 +79,7 @@ Simple geometric vector mark, two or three flat colors
 
 <details><summary>Prompt template</summary>
 
-```text
-App icon logo mark: {subject}. Flat vector style, simple geometric shapes, two or three flat colors, no gradients, no outline shadow. Iconic and legible at 16px and 256px, centered with even padding, single isolated mark, transparent background, no text, no letters.
-```
+> App icon logo mark: {subject}. Flat vector style, simple geometric shapes, two or three flat colors, no gradients, no outline shadow. Iconic and legible at 16px and 256px, centered with even padding, single isolated mark, transparent background, no text, no letters.
 
 </details>
 
@@ -103,9 +95,7 @@ Bold glyph on a rounded-square colored tile, like a phone app icon
 
 <details><summary>Prompt template</summary>
 
-```text
-App icon: a rounded-square tile filled with one bold color, with {subject} as a simple high-contrast glyph in the middle. Flat style, generous padding inside the tile, crisp edges. The tile is centered and everything outside the tile is transparent background. No text, no letters.
-```
+> App icon: a rounded-square tile filled with one bold color, with {subject} as a simple high-contrast glyph in the middle. Flat style, generous padding inside the tile, crisp edges. The tile is centered and everything outside the tile is transparent background. No text, no letters.
 
 </details>
 
@@ -121,9 +111,7 @@ Cartoon sticker with a thick white die-cut border
 
 <details><summary>Prompt template</summary>
 
-```text
-Sticker emblem icon: {subject}. Bold cartoon illustration with a thick white die-cut border and a dark outline, vivid colors, simple cel shading. Centered, single isolated subject, legible at small sizes, transparent background, no text, no letters.
-```
+> Sticker emblem icon: {subject}. Bold cartoon illustration with a thick white die-cut border and a dark outline, vivid colors, simple cel shading. Centered, single isolated subject, legible at small sizes, transparent background, no text, no letters.
 
 </details>
 
@@ -139,9 +127,7 @@ Cute character that personifies the project
 
 <details><summary>Prompt template</summary>
 
-```text
-Cute mascot character icon: {subject}. Chibi proportions, big expressive eyes, friendly pose, clean cartoon line art with soft shading, two or three main colors. Head and upper body fill most of the frame, centered, single isolated character, transparent background, no text, no letters.
-```
+> Cute mascot character icon: {subject}. Chibi proportions, big expressive eyes, friendly pose, clean cartoon line art with soft shading, two or three main colors. Head and upper body fill most of the frame, centered, single isolated character, transparent background, no text, no letters.
 
 </details>
 
@@ -157,9 +143,7 @@ Soft glossy 3D render, like a vinyl toy or clay model
 
 <details><summary>Prompt template</summary>
 
-```text
-3D icon of {subject}, rendered like a glossy vinyl toy or soft clay model. Rounded chunky forms, soft studio lighting, gentle highlights, pastel to medium saturated colors, no harsh shadows on the ground. Centered single isolated object, transparent background, no text, no letters.
-```
+> 3D icon of {subject}, rendered like a glossy vinyl toy or soft clay model. Rounded chunky forms, soft studio lighting, gentle highlights, pastel to medium saturated colors, no harsh shadows on the ground. Centered single isolated object, transparent background, no text, no letters.
 
 </details>
 
@@ -175,9 +159,7 @@ Single-weight monoline icon, one or two colors, very minimal
 
 <details><summary>Prompt template</summary>
 
-```text
-Minimal line icon of {subject}. Single consistent stroke weight, rounded line caps, one or two colors, no fill or only one small flat fill accent, lots of negative space. Centered with even padding, single isolated glyph, transparent background, no text, no letters.
-```
+> Minimal line icon of {subject}. Single consistent stroke weight, rounded line caps, one or two colors, no fill or only one small flat fill accent, lots of negative space. Centered with even padding, single isolated glyph, transparent background, no text, no letters.
 
 </details>
 
