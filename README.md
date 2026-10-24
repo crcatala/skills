@@ -87,6 +87,7 @@ when needed: `npx skills add anomalyco/opentui --skill opentui`.
 | [`evaluate-competing-prs`](skills/evaluate-competing-prs/SKILL.md) | Compare PRs from different agents, with scoring |
 | [`qa-verify-pr`](skills/qa-verify-pr/SKILL.md) | QA a PR against the running app with `agent-browser` |
 | [`security-audit-api`](skills/security-audit-api/SKILL.md) | Audit public API endpoints against a local server |
+| [`anatomy`](skills/anatomy/SKILL.md) | Explain an idea as a detailed, interactive isometric SVG machine (Node 20.10+, Chrome) |
 
 ## Experimental skills
 

@@ -7,6 +7,10 @@ separately unless they carry `metadata.version` for their own breaking changes.
 ## [Unreleased]
 
 ### Added
+- `anatomy`: user-invoked skill that builds interactive isometric SVG figures
+  explaining an idea as a physical machine, derived from wheresryan22/anatomy at
+  `1482e84`. Gallery publishing and session-log reading are removed; built
+  example pages and PDFs are not shipped.
 - `terminal-capture`: capture-only workflow for verified terminal output. Produces
   animated plus static SVG by default (scripted PTY recorder to asciicast v2, rendered
   by svgcast built from source at a pinned, hash-checked version), with Charmbracelet

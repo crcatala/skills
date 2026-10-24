@@ -1,0 +1,6 @@
+# Built example pages, PDFs and verification output.
+examples/*/*.html
+examples/*/*.pdf
+examples/*/*.png
+shots/
+audit.txt
