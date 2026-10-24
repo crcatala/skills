@@ -34,6 +34,15 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## anatomy
+
+`skills/anatomy` is derived from
+[wheresryan22/anatomy](https://github.com/wheresryan22/anatomy) at commit
+`1482e84`, distributed under the MIT license (Copyright (c) 2026 Ryan). It is
+user-invoked here, with the community-gallery publishing and session-log reading
+removed. The upstream notice is bundled in
+[skills/anatomy/THIRD_PARTY_NOTICE.md](skills/anatomy/THIRD_PARTY_NOTICE.md).
+
 ## agent-browser
 
 The thin browser QA policy consults guides supplied by the installed
