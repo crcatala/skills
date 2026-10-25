@@ -11,6 +11,13 @@ separately unless they carry `metadata.version` for their own breaking changes.
   explaining an idea as a physical machine, derived from wheresryan22/anatomy at
   `1482e84`. Gallery publishing and session-log reading are removed; built
   example pages and PDFs are not shipped.
+- `independent-pr-review`: user-invoked. Runs one or more reviewers (codex, claude or pi,
+  each with a configured model and effort) without a UI and in parallel; each reviews the
+  branch's PR (Good/Bad/Ugly) and triages its own findings in the same session. The
+  invoking agent then assesses the triaged findings as the author. Reviewers come from
+  `~/.config/independent-pr-review/config.json` (one default; `all`, named or ad-hoc
+  `harness:model:effort` on request); results are saved under the git common dir (or
+  `INDEPENDENT_PR_REVIEW_OUTPUT_DIR`), keeping the newest `keep_runs` runs per branch.
 - `terminal-capture`: capture-only workflow for verified terminal output. Produces
   animated plus static SVG by default (scripted PTY recorder to asciicast v2, rendered
   by svgcast built from source at a pinned, hash-checked version), with Charmbracelet

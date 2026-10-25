@@ -75,6 +75,7 @@ when needed: `npx skills add anomalyco/opentui --skill opentui`.
 | [`review-pr-good-bad-ugly`](skills/review-pr-good-bad-ugly/SKILL.md) | Full PR read, structured Good/Bad/Ugly review |
 | [`triage-review-findings`](skills/triage-review-findings/SKILL.md) | Which Bad/Ugly findings are worth fixing (recommend only) |
 | [`assess-review-feedback`](skills/assess-review-feedback/SKILL.md) | Judge another agent's review feedback (pass it as the argument) |
+| [`independent-pr-review`](skills/independent-pr-review/SKILL.md) | Run one or more other agents (codex, claude, pi) as PR reviewers in parallel, then assess their triaged findings |
 | [`review-and-fix-pr`](skills/review-and-fix-pr/SKILL.md) | Review, comment, fix worthwhile issues, push |
 | [`review-pr-overengineering`](skills/review-pr-overengineering/SKILL.md) | Assess over-engineering, comment, simplify, push |
 | [`create-pr`](skills/create-pr/SKILL.md) | Open a PR with summary and technical details |

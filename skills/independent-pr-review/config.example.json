@@ -1,0 +1,10 @@
+{
+  "default": ["codex-sol"],
+  "timeout_minutes": 30,
+  "keep_runs": 10,
+  "reviewers": {
+    "codex-sol": { "harness": "codex", "model": "gpt-6.1-sol", "effort": "medium" },
+    "claude-opus": { "harness": "claude", "model": "opus", "effort": "high" },
+    "pi-sonnet": { "harness": "pi", "model": "anthropic/claude-sonnet-5-5", "effort": "medium" }
+  }
+}
