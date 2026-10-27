@@ -136,3 +136,11 @@ global npm, pnpm or bun, mise, npx, uv tool, pipx, pip) and updates the same
 way, so it never installs a second copy next to the first. It prints each
 command before running it, runs it in the foreground, and refuses to update a
 checkout that is dirty or not on `main`.
+
+### The skill runs only when asked
+
+The skill is user-invoked (`disable-model-invocation: true`): it edits
+repositories and can cut releases, so an agent never picks it up on its own
+from a passing mention of releases or versions. The invocation text names the
+target repositories and the mode (`audit`, `apply`, `release`), and the skill
+still asks before any edit and before any real release.

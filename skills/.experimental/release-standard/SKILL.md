@@ -1,7 +1,9 @@
 ---
 name: release-standard
-description: "Set up, audit, or bring in line a CLI repository's release process with one shared standard: release-it (Node/TypeScript) or native tools (Python) for version bump, Keep a Changelog with an LLM-drafted Unreleased section, vX.Y.Z tags, GitHub Release, publish last from the tag; a `--version` line of the form `name X.Y.Z (sha7 YYYY-MM-DD)` for both registry installs and local builds; an `update` command that follows the install method; and a README Install section with a from-source path. Use when adding or fixing release scripts, RELEASING.md, version output, self-update, or install docs."
+description: "Audit, set up, or cut a release in a CLI repository with the shared release standard: release-it (Node) or native tools (Python), Keep a Changelog with an LLM-drafted section, vX.Y.Z tags, publish last from the tag, a `name X.Y.Z (sha7 YYYY-MM-DD)` --version line, an `update` command, and a from-source install section."
 compatibility: "Requires git, bash and python3 (audit). Node repositories need Node 22.18+ and release-it 21 (GitHub Releases through a GITHUB_TOKEN or the browser); Python repositories need uv or twine, and gh for GitHub Releases."
+disable-model-invocation: true
+argument-hint: "[audit | apply | release] [repo path or name, ...] [notes]"
 ---
 
 # Release standard
@@ -33,6 +35,29 @@ contract with their own tools, as the Python wiring does.
 
 Check: `git --version && python3 --version` (and `node --version` for a Node
 repository). Report anything missing and stop; do not install system packages.
+
+## Invocation
+
+The text after the skill name picks the target and the mode. Nothing given
+means: the repository in the current directory, full workflow.
+
+- **Target.** A path (`~/src/mytool`, `../other`) is used as is. A bare
+  repository name or `owner/repo` is looked for among the current directory,
+  its parent's other directories, and the user's own instructions; if no local
+  clone is found, ask where it is or whether to clone it, and where. Several
+  targets are handled one at a time: audit all of them first and show one
+  combined summary, then apply to each only after its own go-ahead.
+- **Mode.**
+  - `audit` (or "check", "report"): step 1 only, then a short summary of the
+    gaps per repository. No edits.
+  - `apply` (the default): the full workflow below.
+  - `release`: cut a release of a repository that already follows the
+    standard (see "Releasing a repository that follows the standard").
+- **Notes.** Anything else (for example "skip the update command for now",
+  "Python only") narrows the plan in step 2.
+
+Work inside the target repository: run its commands from its root and edit
+only its files.
 
 ## Workflow
 
@@ -88,3 +113,5 @@ Experimental. The canonical scripts are copied into each repository for now.
 Once they stop changing, the release scripts are planned to move into a shared
 npm dev dependency and `cli-meta` into a small runtime package, at which point
 this skill will install those instead of copying files.
+
+Any additional text supplied when this skill was invoked (a trailing `ARGUMENTS:` line, or a user message following these instructions) is extra context or instructions for this task; apply it as described in Invocation.
