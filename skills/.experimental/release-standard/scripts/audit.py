@@ -36,6 +36,9 @@ NODE_PACKAGE_SCRIPTS = {
     "test:package": "bash scripts/test-package.sh",
 }
 
+# "files" entries that ship dist/build-info.json. Anything narrower (dist/**/*.js) drops it.
+STAMP_PATTERNS = {"dist", "dist/*", "dist/**", "dist/**/*", "dist/*.json", "dist/**/*.json", "dist/build-info.json"}
+
 SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".venv", "venv", "__pycache__"}
 
 
@@ -49,6 +52,16 @@ class Report:
     @property
     def failed(self) -> bool:
         return any(i["status"] == "fail" for i in self.items)
+
+
+def load_json(report: Report, path: Path) -> dict | None:
+    """Parse a JSON file, reporting (not raising) when it is not plain JSON."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError) as e:
+        report.check(False, f"{path.name} is valid JSON", f"fix or simplify it (comments are not supported): {e}")
+        return None
+    return data if isinstance(data, dict) else {}
 
 
 def find_file(repo: Path, name: str, under: str = "src") -> Path | None:
@@ -94,14 +107,15 @@ def shared_checks(report: Report, repo: Path) -> None:
 
 
 def node_checks(report: Report, repo: Path) -> None:
-    pkg = json.loads((repo / "package.json").read_text())
+    pkg = load_json(report, repo / "package.json")
+    if pkg is None:
+        return
     scripts = pkg.get("scripts", {})
 
     config_path = repo / ".release-it.json"
     if not config_path.exists():
         report.check(False, ".release-it.json exists", "copy templates/node/release-it.json to .release-it.json")
-    else:
-        config = json.loads(config_path.read_text())
+    elif (config := load_json(report, config_path)) is not None:
         git = config.get("git", {})
         report.check(git.get("tagName") == "v${version}" and git.get("commitMessage") == "chore: release v${version}",
                      "release-it tags v${version} with commit 'chore: release v${version}'",
@@ -132,8 +146,12 @@ def node_checks(report: Report, repo: Path) -> None:
 
     files = pkg.get("files")
     if files is not None:
-        ships = any(f in ("dist", "dist/", "dist/**", "dist/build-info.json") for f in files)
+        ships = any(f.rstrip("/") in STAMP_PATTERNS for f in files if isinstance(f, str))
         report.check(ships, 'package.json "files" ships dist/build-info.json', 'add "dist/build-info.json" to "files"')
+    name = pkg.get("name", "")
+    if name.startswith("@") and not pkg.get("private"):
+        report.check(pkg.get("publishConfig", {}).get("access") == "public", "scoped package publishes as public",
+                     'add "publishConfig": { "access": "public" } (release.mjs passes no --access flag)')
     if pkg.get("private"):
         report.check(bool(pkg.get("repository")), "private package declares repository",
                      'add "repository" so `update` can reinstall from git')
@@ -156,12 +174,25 @@ def python_checks(report: Report, repo: Path) -> None:
                      level="warn")
 
 
+def language(repo: Path) -> str | None:
+    """A package.json with a "bin" is a Node CLI; otherwise pyproject.toml wins, so a Python
+    repository with a tooling-only package.json still gets the Python checks."""
+    has_pkg, has_py = (repo / "package.json").exists(), (repo / "pyproject.toml").exists()
+    if has_pkg and has_py:
+        try:
+            return "node" if json.loads((repo / "package.json").read_text()).get("bin") else "python"
+        except (OSError, ValueError, AttributeError):
+            return "python"
+    return "node" if has_pkg else "python" if has_py else None
+
+
 def audit(repo: Path) -> Report:
     report = Report()
     shared_checks(report, repo)
-    if (repo / "package.json").exists():
+    lang = language(repo)
+    if lang == "node":
         node_checks(report, repo)
-    elif (repo / "pyproject.toml").exists():
+    elif lang == "python":
         python_checks(report, repo)
     else:
         report.check(False, "language detected", "no package.json or pyproject.toml; apply the shared parts by hand",

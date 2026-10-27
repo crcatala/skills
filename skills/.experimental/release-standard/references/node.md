@@ -51,14 +51,27 @@ smoke-test checks in `scripts/test-package.local.sh`; it is sourced with
   does not; add `"dist/build-info.json"` explicitly. `test-package.sh` fails
   when it is missing.
 - `prepack` is what makes `npm pack` (the smoke test) and `npm publish` (the
-  release) build from the commit they run on. Keep an existing
-  `prepublishOnly` (for example a secret scan); it runs after `prepack`.
+  release) build from the commit they run on. npm runs `prepublishOnly`
+  **before** `prepack`, so a check of the build output (a secret scan of
+  `dist/`) placed there would scan the previous build. Put such checks in
+  `prepack`, after the build:
+  `"prepack": "npm run build && <scan dist>"`. Checks of the source tree can
+  stay in `prepublishOnly`.
+- `dist/` must be gitignored. Otherwise every build counts as uncommitted
+  changes and the stamp always says `-dirty`.
+- A scoped package (`@scope/name`) that is public needs
+  `"publishConfig": { "access": "public" }`. `release.mjs` passes no
+  `--access` flag, so package.json decides and a package meant to stay
+  restricted is never published as public by accident.
 - Repositories that published before the standard may have `release:first`;
   drop it. A first release from an already-set version is
   `npm run release -- <version> --npm.allowSameVersion`.
 - A private (unpublished) package keeps `"private": true` and a `repository`
-  field; `release.mjs` then stops after the GitHub Release, and `update`
-  reinstalls from the repository URL.
+  field (`github:owner/repo`, `owner/repo`, `git@host:owner/repo.git` or a
+  full URL). `release.mjs` then stops after the GitHub Release, and `update`
+  compares with the repository's `main` and reinstalls from it with npm, pnpm
+  or bun. It never looks the name up on the registry, where an unrelated
+  package could have it.
 
 ## Why release.mjs exists
 
@@ -100,10 +113,14 @@ Other parsers: print `versionLine(...)` for `--version`/`-V` and exit 0.
 
 Notes on `cli-meta.ts`:
 
-- It needs ESM (`import.meta.url`). In a CommonJS build, pass the package
-  directory to `packageMeta()` from `__dirname` instead.
+- `import.meta.url` appears only in the `HERE` constant near the top. In a
+  CommonJS build, change that line to `const HERE = __dirname;` and drop the
+  `node:url` import.
 - It finds the package root by walking up from its own file to the first
   `package.json`, so it works from `src/` (tsx, bun) and from `dist/`.
+- In a checkout, code running from `dist/` reports the stamp (the commit that
+  build came from), and code running from `src/` reads git (the current commit
+  and `-dirty`). Outside a checkout the stamp is the only source.
 - A source checkout is detected by `.git` at the package root. In a monorepo
   where the CLI is one package, detect the checkout from the repository root
   and run the build for that package.
@@ -117,6 +134,6 @@ Notes on `cli-meta.ts`:
 ```bash
 npm run verify && npm run test:package   # the smoke test checks the --version format
 npm run release:dry
-node dist/cli.js --version               # <tool> X.Y.Z (sha7 YYYY-MM-DD), -dirty while uncommitted
+node dist/cli.js --version               # <tool> X.Y.Z (sha7 YYYY-MM-DD), -dirty if built with uncommitted changes
 node dist/cli.js update --check          # from a linked checkout: compares with origin/main
 ```

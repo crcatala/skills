@@ -1,7 +1,7 @@
 // Tests for templates/node: cli-meta.ts, build-info.mjs and test-package.sh. Node 22.18+ (type stripping).
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +12,7 @@ import {
   compareVersions,
   detectInstall,
   formatVersion,
+  gitCloneUrl,
   gitInstallUrl,
   packageMeta,
   updateSteps,
@@ -72,9 +73,13 @@ describe("updateSteps", () => {
     assert.deepEqual(updateSteps("npm", meta()), [{ cmd: "npm", args: ["install", "-g", "@scope/tool@latest"] }]);
     assert.deepEqual(updateSteps("mise", meta()), [{ cmd: "mise", args: ["upgrade", "--bump", "npm:@scope/tool"] }]);
   });
-  test("private npm installs reinstall from git", () => {
-    const steps = updateSteps("npm", meta({ isPrivate: true, repositoryUrl: "git+https://github.com/o/r.git" }));
-    assert.deepEqual(steps, [{ cmd: "npm", args: ["install", "-g", "git+https://github.com/o/r.git"] }]);
+  test("private packages reinstall from git, never from the registry", () => {
+    const priv = meta({ isPrivate: true, repositoryUrl: "github:o/r" });
+    const url = "git+https://github.com/o/r.git";
+    assert.deepEqual(updateSteps("npm", priv), [{ cmd: "npm", args: ["install", "-g", url] }]);
+    assert.deepEqual(updateSteps("pnpm", priv), [{ cmd: "pnpm", args: ["add", "-g", url] }]);
+    assert.deepEqual(updateSteps("bun", priv), [{ cmd: "bun", args: ["add", "-g", url] }]);
+    assert.equal(updateSteps("mise", priv), null);
     assert.equal(updateSteps("npm", meta({ isPrivate: true })), null);
   });
   test("checkout pulls, installs and builds with its package manager", () => {
@@ -90,10 +95,19 @@ describe("updateSteps", () => {
   });
 });
 
-test("gitInstallUrl", () => {
-  assert.equal(gitInstallUrl("github:o/r"), "git+https://github.com/o/r.git");
-  assert.equal(gitInstallUrl("https://github.com/o/r.git"), "git+https://github.com/o/r.git");
-  assert.equal(gitInstallUrl("git+ssh://git@github.com/o/r.git"), "git+ssh://git@github.com/o/r.git");
+test("repository URLs normalize once for git and for installers", () => {
+  for (const [input, clone] of [
+    ["github:o/r", "https://github.com/o/r.git"],
+    ["o/r", "https://github.com/o/r.git"],
+    ["o/r.git", "https://github.com/o/r.git"],
+    ["git@github.com:o/r.git", "ssh://git@github.com/o/r.git"],
+    ["https://github.com/o/r.git", "https://github.com/o/r.git"],
+    ["git+https://github.com/o/r.git", "https://github.com/o/r.git"],
+    ["git+ssh://git@github.com/o/r.git", "ssh://git@github.com/o/r.git"],
+  ]) {
+    assert.equal(gitCloneUrl(input), clone, input);
+    assert.equal(gitInstallUrl(input), `git+${clone}`, input);
+  }
 });
 
 test("compareVersions", () => {
@@ -124,6 +138,23 @@ describe("packageMeta and buildInfo", () => {
     const info = buildInfo(packageMeta(root));
     assert.equal(info.commit, sh(root, "git", ["rev-parse", "HEAD"]));
     assert.equal(info.dirty, false);
+  });
+  test("in a checkout, dist/ reports the stamp and src/ reads git", () => {
+    const root = mkTemp();
+    mkdirSync(join(root, "src"));
+    mkdirSync(join(root, "dist"));
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "t", version: "0.1.0" }));
+    writeFileSync(join(root, ".gitignore"), "dist/\n");
+    writeFileSync(join(root, "dist", "build-info.json"), JSON.stringify({ version: "0.1.0", commit: "e".repeat(40), date: "2026-01-01", dirty: false }));
+    sh(root, "git", ["init", "-q", "-b", "main"]);
+    sh(root, "git", ["add", "-A"]);
+    sh(root, "git", ["commit", "-q", "-m", "init"]);
+    writeFileSync(join(root, "src", "edited.ts"), "x");
+    const m = packageMeta(root);
+    assert.equal(buildInfo(m, join(root, "dist")).commit, "e".repeat(40));
+    const fromSource = buildInfo(m, join(root, "src"));
+    assert.equal(fromSource.commit, sh(root, "git", ["rev-parse", "HEAD"]));
+    assert.equal(fromSource.dirty, true);
   });
   test("version only outside git", () => {
     const root = mkTemp();
@@ -171,10 +202,91 @@ else console.log("usage: fixture");
   assert.throws(() => sh(root, "bash", ["scripts/test-package.sh"]), /expected '<name> X\.Y\.Z/);
 });
 
-test("release.mjs parses and prints usage", () => {
-  const root = mkTemp();
-  writeFileSync(join(root, "package.json"), JSON.stringify({ name: "t", version: "1.0.0" }));
+// release.mjs with stub `npm` and `release-it` executables: the preflight gates the publish, and the
+// publish happens only after release-it has tagged the release commit.
+describe("release.mjs", () => {
   const script = join(templates, "node", "release.mjs");
-  sh(root, process.execPath, ["--check", script]);
-  assert.throws(() => sh(root, process.execPath, [script]), /usage: node scripts\/release\.mjs/);
+  const setup = (pkg: Record<string, unknown> = { name: "t", version: "1.0.0" }) => {
+    const root = mkTemp();
+    const bin = join(root, "stub-bin");
+    const log = join(root, "calls.log");
+    mkdirSync(bin);
+    mkdirSync(join(root, "node_modules", ".bin"), { recursive: true });
+    // npm: logged in, version not on the registry yet, publish recorded.
+    writeFileSync(join(bin, "npm"), `#!/usr/bin/env bash
+echo "npm $*" >> "${log}"
+case "$1" in
+  whoami) echo tester ;;
+  view) echo "npm error code E404" >&2; exit 1 ;;
+esac
+`);
+    // release-it: bump to 1.0.1, commit and tag, as the real one does (dry runs change nothing).
+    writeFileSync(join(root, "node_modules", ".bin", "release-it"), `#!/usr/bin/env bash
+echo "release-it $*" >> "${log}"
+for a in "$@"; do [[ "$a" == --dry-run ]] && exit 0; done
+node -e 'const f="package.json",p=JSON.parse(require("fs").readFileSync(f));p.version="1.0.1";require("fs").writeFileSync(f,JSON.stringify(p))'
+git commit -qam "chore: release v1.0.1" && git tag -a v1.0.1 -m "Release 1.0.1"
+`);
+    chmodSync(join(bin, "npm"), 0o755);
+    chmodSync(join(root, "node_modules", ".bin", "release-it"), 0o755);
+    writeFileSync(join(root, "package.json"), JSON.stringify(pkg));
+    writeFileSync(join(root, ".gitignore"), "node_modules/\nstub-bin/\ncalls.log\n");
+    sh(root, "git", ["init", "-q", "-b", "main"]);
+    sh(root, "git", ["add", "-A"]);
+    sh(root, "git", ["commit", "-q", "-m", "init"]);
+    const runIt = (...args: string[]) =>
+      spawnSync(process.execPath, [script, ...args], {
+        cwd: root,
+        encoding: "utf8",
+        env: { ...gitEnv, PATH: `${bin}:${process.env.PATH}` },
+      });
+    const calls = () => (existsSync(log) ? readFileSync(log, "utf8") : "");
+    return { root, runIt, calls };
+  };
+
+  test("prints usage without a command", () => {
+    const { runIt } = setup();
+    const r = runIt();
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /usage: node scripts\/release\.mjs/);
+  });
+
+  test("publish refuses an untagged HEAD", () => {
+    const { runIt, calls } = setup();
+    const r = runIt("publish");
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /HEAD is not tagged v1\.0\.0/);
+    assert.doesNotMatch(calls(), /npm publish/);
+  });
+
+  test("a dry run never publishes", () => {
+    const { runIt, calls } = setup();
+    assert.equal(runIt("release", "--dry-run").status, 0);
+    assert.match(calls(), /release-it --dry-run/);
+    assert.doesNotMatch(calls(), /npm publish/);
+  });
+
+  test("release publishes after release-it tags, without --access", () => {
+    const { runIt, calls } = setup();
+    const r = runIt("release", "patch");
+    assert.equal(r.status, 0, r.stderr);
+    const log = calls();
+    assert.ok(log.indexOf("release-it patch") < log.indexOf("npm publish"), log);
+    assert.match(log, /^npm publish$/m);
+  });
+
+  test("refuses to release when HEAD is already the release", () => {
+    const { root, runIt, calls } = setup();
+    sh(root, "git", ["tag", "-a", "v1.0.0", "-m", "Release 1.0.0"]);
+    const r = runIt("release");
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /already the v1\.0\.0 release/);
+    assert.doesNotMatch(calls(), /release-it/);
+  });
+
+  test("a private package is released but never published", () => {
+    const { runIt, calls } = setup({ name: "t", version: "1.0.0", private: true });
+    assert.equal(runIt("release", "patch").status, 0);
+    assert.doesNotMatch(calls(), /npm (publish|whoami)/);
+  });
 });

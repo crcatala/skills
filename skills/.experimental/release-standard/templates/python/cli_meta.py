@@ -13,8 +13,11 @@ Version line and self-update for a Python CLI. Copy into the package, then (Type
     def update(check: bool = False, force: bool = False) -> None:
         raise typer.Exit(cli_meta.run_update("mytool", "my-dist", check=check, force=force))
 
-The build stamps _build_info.json next to this file (scripts/build_info.py). Without it, a run
-from a git checkout reads git directly, and anything else prints the version alone.
+Pass published=False to run_update for a tool that is not on PyPI: it then never looks the name
+up on PyPI (an unrelated package could have it) and only updates from the original source.
+
+A built wheel carries _build_info.json next to this file (scripts/build_info.py). A run from a
+git checkout (an editable install) reads git instead, so it always shows the current commit.
 """
 
 from __future__ import annotations
@@ -60,13 +63,13 @@ def build_info(dist: str, package_dir: Path = HERE) -> dict:
     except metadata.PackageNotFoundError:
         version = "unknown"
     info: dict = {"version": version}
+    root = checkout_root(package_dir)
     stamp = package_dir / "_build_info.json"
-    if stamp.exists():
+    if not root and stamp.exists():
         try:
             return {**info, **json.loads(stamp.read_text())}
         except ValueError:
             pass
-    root = checkout_root(package_dir)
     commit = _run(["git", "rev-parse", "HEAD"], cwd=root) if root else None
     if commit:
         info["commit"] = commit
@@ -97,14 +100,30 @@ def detect_install(package_dir: str, checkout: bool) -> str:
     return "unknown"
 
 
-def update_steps(kind: str, dist: str, python: str = sys.executable) -> list[list[str]] | None:
-    return {
-        "checkout": [["git", "pull", "--ff-only"]],
+def reinstall_checkout(root: Path, prefix: str = sys.prefix, python: str = sys.executable) -> list[str]:
+    """Reinstall an editable checkout with the installer that owns its environment, so dependency
+    changes and the version in the installed metadata follow the pull."""
+    p = prefix.replace("\\", "/")
+    if "/uv/tools/" in p:
+        return ["uv", "tool", "install", "--editable", str(root), "--reinstall"]
+    if "/pipx/venvs/" in p:
+        return ["pipx", "install", "--editable", str(root), "--force"]
+    return [python, "-m", "pip", "install", "--editable", str(root)]
+
+
+def update_steps(kind: str, dist: str, *, root: Path | None = None, published: bool = True,
+                 prefix: str = sys.prefix, python: str = sys.executable) -> list[list[str]] | None:
+    if kind == "checkout":
+        return [["git", "pull", "--ff-only"], reinstall_checkout(root, prefix, python)] if root else None
+    # uv and pipx reinstall from the source recorded at install time; pip and mise would look the
+    # name up on PyPI, which is wrong for an unpublished tool.
+    steps = {
         "uv": [["uv", "tool", "upgrade", dist]],
-        "mise": [["mise", "upgrade", "--bump", f"pipx:{dist}"]],
         "pipx": [["pipx", "upgrade", dist]],
-        "pip": [[python, "-m", "pip", "install", "--upgrade", dist]],
-    }.get(kind)
+        "mise": [["mise", "upgrade", "--bump", f"pipx:{dist}"]] if published else None,
+        "pip": [[python, "-m", "pip", "install", "--upgrade", dist]] if published else None,
+    }
+    return steps.get(kind)
 
 
 # ── latest version ──────────────────────────────────────────────────────────
@@ -138,7 +157,7 @@ def pypi_latest(dist: str) -> str | None:
         return None
 
 
-def check_for_update(kind: str, dist: str, info: dict, root: Path | None) -> dict:
+def check_for_update(kind: str, dist: str, info: dict, root: Path | None, published: bool = True) -> dict:
     """{'current', 'latest', 'available' (None when unknown), 'reason'}."""
     if kind == "checkout" and root:
         if _run(["git", "fetch", "--quiet", "origin", "main"], cwd=root) is None:
@@ -147,9 +166,12 @@ def check_for_update(kind: str, dist: str, info: dict, root: Path | None) -> dic
         head = _run(["git", "rev-parse", "--short=7", "HEAD"], cwd=root)
         remote = _run(["git", "rev-parse", "--short=7", "origin/main"], cwd=root)
         return {"current": head, "latest": remote, "available": behind not in (None, "0")}
+    if not published:
+        reason = "unpublished, so there is no version to compare; `update --force` reinstalls from the original source"
+        return {"current": info["version"], "available": None, "reason": reason}
     latest = pypi_latest(dist)
     if not latest:
-        reason = "no latest version from PyPI; if this tool is unpublished, `update --force` reinstalls it"
+        reason = "could not get the latest version from PyPI"
         return {"current": info["version"], "available": None, "reason": reason}
     return {"current": info["version"], "latest": latest, "available": compare_versions(info["version"], latest) < 0}
 
@@ -157,12 +179,12 @@ def check_for_update(kind: str, dist: str, info: dict, root: Path | None) -> dic
 # ── update command ──────────────────────────────────────────────────────────
 
 
-def run_update(name: str, dist: str, check: bool = False, force: bool = False) -> int:
+def run_update(name: str, dist: str, check: bool = False, force: bool = False, published: bool = True) -> int:
     """Exit code: see the release standard's update table."""
     root = checkout_root()
     kind = detect_install(str(HERE), root is not None)
     info = build_info(dist)
-    status = check_for_update(kind, dist, info, root)
+    status = check_for_update(kind, dist, info, root, published)
 
     if status["available"] is None:
         print(f"{name}: cannot tell whether an update is available ({status['reason']}).", file=sys.stderr)
@@ -176,9 +198,9 @@ def run_update(name: str, dist: str, check: bool = False, force: bool = False) -
     if check:
         return 1 if status["available"] else 0
 
-    steps = update_steps(kind, dist)
+    steps = update_steps(kind, dist, root=root, published=published)
     if steps is None:
-        print(f"{name}: installed at {HERE}, which is not a recognized install method.", file=sys.stderr)
+        print(f"{name}: cannot update the install at {HERE} automatically ({kind}).", file=sys.stderr)
         print(f"Update it the way it was installed, for example `uv tool upgrade {dist}`.", file=sys.stderr)
         return 1
     if kind == "checkout":
@@ -189,10 +211,13 @@ def run_update(name: str, dist: str, check: bool = False, force: bool = False) -
             return 1
     for step in steps:
         print("$ " + " ".join(step))
-        if subprocess.run(step, cwd=root if kind == "checkout" else None).returncode != 0:
+        try:
+            code = subprocess.run(step, cwd=root if kind == "checkout" else None).returncode
+        except OSError as e:
+            print(f"{name}: could not run `{step[0]}` ({e.strerror or e}).", file=sys.stderr)
+            return 1
+        if code != 0:
             print(f"{name}: `{' '.join(step)}` failed.", file=sys.stderr)
             return 1
-    if kind == "checkout":
-        print("Pulled. If dependencies changed, reinstall the tool from the checkout.")
     print(f"{name} updated. Check with `{name} --version`.")
     return 0

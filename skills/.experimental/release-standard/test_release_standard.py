@@ -84,12 +84,13 @@ class PrepReleaseTest(TempDirTest):
         commit_all(repo, "feat: old thing")
         sh(repo, "git", "tag", "v0.1.0")
         (repo / "b").write_text("2")
-        commit_all(repo, "fix: new thing\n\nCo-authored-by: someone <x@example.com>")
+        commit_all(repo, "fix: new thing\n\nco-authored-by: someone <x@example.com>")
+        sh(repo, "git", "tag", "deploy-2026")  # not a version tag: must not become the range start
         out = sh(repo, "bash", str(TEMPLATES / "shared" / "prep-release.sh")).stdout
         self.assertIn("Changes since: v0.1.0", out)
         self.assertIn("## fix: new thing", out)
         self.assertNotIn("old thing", out)
-        self.assertNotIn("Co-authored-by", out)
+        self.assertNotIn("co-authored-by", out.lower())
         self.assertLess(out.index("Changelog prompt"), out.index("## fix: new thing"))
 
     def test_first_release_shows_everything(self):
@@ -117,6 +118,28 @@ class PythonBuildInfoTest(TempDirTest):
         self.assertTrue(json.loads((repo / "_build_info.json").read_text())["dirty"])
 
 
+class PythonCliMetaCheckoutTest(TempDirTest):
+    def test_checkout_reads_git_even_with_a_stamp(self):
+        repo = git_repo(self.dir)
+        (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+        pkg = repo / "src" / "x"
+        pkg.mkdir(parents=True)
+        (repo / ".gitignore").write_text("_build_info.json\n")
+        (pkg / "_build_info.json").write_text(json.dumps({"commit": "e" * 40, "date": "2026-01-01", "dirty": False}))
+        commit_all(repo, "init")
+        (pkg / "edit.py").write_text("x = 1\n")
+        info = cli_meta.build_info("no-such-dist-for-tests", package_dir=pkg)
+        self.assertEqual(info["commit"], sh(repo, "git", "rev-parse", "HEAD").stdout.strip())
+        self.assertTrue(info["dirty"])
+
+    def test_installed_copy_reads_the_stamp(self):
+        pkg = self.dir / "lib" / "site-packages" / "x"
+        pkg.mkdir(parents=True)
+        (pkg / "_build_info.json").write_text(json.dumps({"commit": "e" * 40, "date": "2026-01-01", "dirty": False}))
+        info = cli_meta.build_info("no-such-dist-for-tests", package_dir=pkg)
+        self.assertEqual(cli_meta.format_version("x", info), "x unknown (eeeeeee 2026-01-01)")
+
+
 class PythonCliMetaTest(unittest.TestCase):
     def test_format_version(self):
         info = {"version": "1.4.2", "commit": "a1b2c3d4e5f6", "date": "2026-10-27"}
@@ -142,6 +165,23 @@ class PythonCliMetaTest(unittest.TestCase):
         self.assertEqual(cli_meta.update_steps("pip", "d", python="py"), [["py", "-m", "pip", "install", "--upgrade", "d"]])
         self.assertEqual(cli_meta.update_steps("mise", "d"), [["mise", "upgrade", "--bump", "pipx:d"]])
         self.assertIsNone(cli_meta.update_steps("unknown", "d"))
+
+    def test_unpublished_tools_never_resolve_the_name_on_pypi(self):
+        self.assertIsNone(cli_meta.update_steps("pip", "d", published=False))
+        self.assertIsNone(cli_meta.update_steps("mise", "d", published=False))
+        self.assertEqual(cli_meta.update_steps("uv", "d", published=False), [["uv", "tool", "upgrade", "d"]])
+        status = cli_meta.check_for_update("uv", "d", {"version": "1.0.0"}, None, published=False)
+        self.assertIsNone(status["available"])
+        self.assertIn("unpublished", status["reason"])
+
+    def test_checkout_update_reinstalls_with_the_owning_installer(self):
+        root = Path("/src/tool")
+        steps = cli_meta.update_steps("checkout", "d", root=root, prefix="/u/.local/share/uv/tools/d")
+        self.assertEqual(steps, [["git", "pull", "--ff-only"], ["uv", "tool", "install", "--editable", "/src/tool", "--reinstall"]])
+        pipx = cli_meta.update_steps("checkout", "d", root=root, prefix="/u/.local/pipx/venvs/d")
+        self.assertEqual(pipx[1], ["pipx", "install", "--editable", "/src/tool", "--force"])
+        pip = cli_meta.update_steps("checkout", "d", root=root, prefix="/src/tool/.venv", python="py")
+        self.assertEqual(pip[1], ["py", "-m", "pip", "install", "--editable", "/src/tool"])
 
     def test_compare_versions(self):
         c = cli_meta.compare_versions
@@ -196,6 +236,39 @@ class AuditTest(TempDirTest):
         pkg["files"] = ["dist/**/*.js"]
         (repo / "package.json").write_text(json.dumps(pkg))
         self.assertEqual(self.statuses(repo)['package.json "files" ships dist/build-info.json'], "fail")
+
+    def test_malformed_json_is_reported_not_raised(self):
+        repo = compliant_node_repo(self.dir)
+        (repo / ".release-it.json").write_text('{ // comments are not JSON\n}')
+        statuses = self.statuses(repo)
+        self.assertEqual(statuses[".release-it.json is valid JSON"], "fail")
+        (repo / "package.json").write_text("{")
+        self.assertEqual(self.statuses(repo)["package.json is valid JSON"], "fail")
+
+    def test_files_patterns(self):
+        repo = compliant_node_repo(self.dir)
+        pkg = json.loads((repo / "package.json").read_text())
+        for files, status in ((["dist/**/*"], "ok"), (["dist/", "README.md"], "ok"), (["dist/**/*.d.ts"], "fail")):
+            pkg["files"] = files
+            (repo / "package.json").write_text(json.dumps(pkg))
+            self.assertEqual(self.statuses(repo)['package.json "files" ships dist/build-info.json'], status, files)
+
+    def test_scoped_public_package_needs_publish_config(self):
+        repo = compliant_node_repo(self.dir)
+        pkg = json.loads((repo / "package.json").read_text())
+        pkg["name"] = "@scope/x"
+        (repo / "package.json").write_text(json.dumps(pkg))
+        self.assertEqual(self.statuses(repo)["scoped package publishes as public"], "fail")
+        pkg["publishConfig"] = {"access": "public"}
+        (repo / "package.json").write_text(json.dumps(pkg))
+        self.assertEqual(self.statuses(repo)["scoped package publishes as public"], "ok")
+
+    def test_python_repo_with_tooling_package_json(self):
+        (self.dir / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+        (self.dir / "package.json").write_text(json.dumps({"devDependencies": {"prettier": "^3"}}))
+        statuses = self.statuses(self.dir)
+        self.assertIn("scripts/build_info.py exists", statuses)
+        self.assertNotIn(".release-it.json exists", statuses)
 
     def test_python_repo(self):
         repo = self.dir

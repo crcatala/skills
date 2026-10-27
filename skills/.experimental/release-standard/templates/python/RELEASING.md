@@ -17,7 +17,7 @@ commit, so a failed upload never leaves a half-made tag.
 ## Before releasing
 
 1. `git checkout main && git pull --ff-only`
-2. `make release-prep` (runs `scripts/prep-release.sh`). Paste the output into an
+2. `bash scripts/prep-release.sh`. Paste the output into an
    LLM, review the result, and put it under `## [Unreleased]` in `CHANGELOG.md`.
 
 ## Release
@@ -25,6 +25,7 @@ commit, so a failed upload never leaves a half-made tag.
 ```bash
 make bump VERSION=X.Y.Z   # version in pyproject.toml (and __init__.py), changelog section,
                           # commit "chore: release vX.Y.Z"; refuses an empty Unreleased
+git push                  # the release commit must be on origin/main before tagging
 make prepublish           # verify, stamp build info, build, install the wheel in a clean
                           # environment and check `<tool> --version`
 make release-dry          # preview the tag and GitHub Release
@@ -39,7 +40,11 @@ uv publish dist/*         # last: upload the files built from the tagged commit
 
 ## When a step fails
 
-- **Before `make release`**: nothing is on the remote yet. Fix and repeat.
+- **Before `git push`**: nothing is on the remote yet. Fix and repeat;
+  `git reset --hard origin/main` drops a local bump commit.
+- **After `git push`, before `make release`**: the bump commit is on `main`
+  but untagged. Fix the cause and continue from `make prepublish`; do not bump
+  again.
 - **GitHub Release**: the tag is pushed. Create it with
   `gh release create vX.Y.Z dist/* --title vX.Y.Z --notes-file <section>`.
 - **Upload**: run `uv publish dist/*` again; files already on PyPI are skipped

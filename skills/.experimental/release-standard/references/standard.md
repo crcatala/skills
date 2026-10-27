@@ -52,8 +52,9 @@ mytool 1.4.3 (9f8e7d6-dirty 2026-10-28)
 - With no commit information at all, print `<name> <version>` with no empty
   parentheses.
 - The same line is printed by a registry install and by a local build. Builds
-  stamp the commit into a build-info file; a run straight from source (no
-  build) reads git instead.
+  stamp the commit into a build-info file, which is what installed copies and
+  built output report. Code running from source in a checkout reads git
+  instead, so a stale build never hides newer commits or edits.
 
 `<tool> version` (a subcommand) is optional and prints the details: version,
 full commit, date, dirty state, install method, and install path. With
@@ -75,14 +76,16 @@ The install method decides both where "latest" comes from and what runs:
 |---|---|---|
 | Source checkout (clone + build + link) | `origin/main` | `git pull --ff-only`, install dependencies, build. Refuses when the tree is dirty or not on `main`. |
 | Global npm, pnpm or bun, from the registry | registry `latest` | `npm install -g <pkg>@latest` (or the pnpm/bun equivalent) |
-| Global npm from a git URL (unpublished) | remote `main` | `npm install -g <git url>` |
+| Global npm, pnpm or bun from a git URL (unpublished) | remote `main` | `npm install -g <git url>` (or `pnpm add -g`, `bun add -g`) |
 | mise (`npm:` or `pipx:` backend) | registry `latest` | `mise upgrade --bump <backend>:<pkg>` |
 | npx | nothing to update | prints that `npx <pkg>@latest` always runs the latest |
 | uv tool, pipx, pip (Python) | PyPI | `uv tool upgrade`, `pipx upgrade`, `pip install -U` |
 | Anything else | | prints the manual steps, exit 1 |
 
 The tool prints the command before running it and runs it in the foreground,
-so prompts reach the terminal.
+so prompts reach the terminal. An unpublished tool never looks its name up on
+a registry, where an unrelated package could have it; when its installer
+cannot reinstall from the original source, `update` says so and stops.
 
 ## Install documentation
 

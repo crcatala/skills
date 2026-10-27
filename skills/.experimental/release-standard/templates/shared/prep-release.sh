@@ -4,7 +4,8 @@
 # Prints a changelog-drafting prompt, then the commits and files changed since the last tag.
 set -euo pipefail
 
-last_tag="${1:-$(git describe --tags --abbrev=0 2>/dev/null || true)}"
+# Only version tags (vX.Y.Z) mark releases; other tags never become the range start.
+last_tag="${1:-$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)}"
 if [[ -n "$last_tag" ]] && ! git rev-parse --verify --quiet "${last_tag}^{commit}" >/dev/null; then
   echo "Error: '$last_tag' is not a valid tag or commit." >&2
   exit 1
@@ -30,7 +31,8 @@ PR or issue numbers in parentheses where the commits mention them.
 === Full commit messages ===
 EOF
 
-git log "$range" --format='## %s%n%n%b%n---' --no-merges | sed '/^Co-authored-by:/Id' | cat -s
+# Drop co-author trailers (any case). awk, not sed's GNU-only `I` flag, so this runs on macOS too.
+git log "$range" --format='## %s%n%n%b%n---' --no-merges | awk 'tolower($0) !~ /^co-authored-by:/' | cat -s
 
 echo
 echo '=== Changed files ==='

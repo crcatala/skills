@@ -55,7 +55,9 @@ function publish({ dryRun, resumeHint }) {
   }
   console.error(`Publishing ${name}@${version} as ${user}${dryRun ? ' (dry run)' : ''}...`);
   // Inherit stdio: npm asks for a one-time password or opens a browser here when the account uses 2FA.
-  const r = spawnSync('npm', ['publish', '--access', 'public', ...(dryRun ? ['--dry-run'] : [])], {
+  // No --access flag: it would override package.json "publishConfig"; scoped packages set
+  // "publishConfig": { "access": "public" } there.
+  const r = spawnSync('npm', ['publish', ...(dryRun ? ['--dry-run'] : [])], {
     cwd: root,
     stdio: 'inherit',
   });

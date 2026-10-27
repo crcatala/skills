@@ -1,7 +1,7 @@
 ---
 name: release-standard
 description: "Set up, audit, or bring in line a CLI repository's release process with one shared standard: release-it (Node/TypeScript) or native tools (Python) for version bump, Keep a Changelog with an LLM-drafted Unreleased section, vX.Y.Z tags, GitHub Release, publish last from the tag; a `--version` line of the form `name X.Y.Z (sha7 YYYY-MM-DD)` for both registry installs and local builds; an `update` command that follows the install method; and a README Install section with a from-source path. Use when adding or fixing release scripts, RELEASING.md, version output, self-update, or install docs."
-compatibility: "Requires git, bash and python3 (audit). Node repositories need Node 22.18+ and release-it 21; Python repositories need uv or twine. gh is used for GitHub Releases."
+compatibility: "Requires git, bash and python3 (audit). Node repositories need Node 22.18+ and release-it 21 (GitHub Releases through a GITHUB_TOKEN or the browser); Python repositories need uv or twine, and gh for GitHub Releases."
 ---
 
 # Release standard
@@ -51,7 +51,7 @@ repository). Report anything missing and stop; do not install system packages.
 2. **Plan and confirm.** List the changes: files to copy, scripts to change,
    CLI code to add, README and RELEASING.md edits, and anything you will keep
    that differs from the standard and why. Wait for the user's go-ahead before
-   editing a repository other than the current one.
+   editing any repository, including the current one.
 
 3. **Apply,** on a branch, following the language reference:
    - Copy canonical files byte for byte from `{baseDir}/templates/`. Never edit

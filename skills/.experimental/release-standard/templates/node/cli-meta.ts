@@ -5,12 +5,16 @@
 //   program.command("update").option("--check").option("--force")
 //     .action((o) => { process.exitCode = runUpdate("mytool", o); });
 //
-// The build stamps dist/build-info.json (scripts/build-info.mjs). Without it, a run from a git
-// checkout (tsx, bun) reads git directly, and anything else prints the version alone.
+// A build stamps dist/build-info.json (scripts/build-info.mjs), which is what a run from dist/
+// reports. A run from source in a git checkout (tsx, bun) reads git instead, so it always shows the
+// current commit; anything else without a stamp prints the version alone.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// The directory of this module. The only ESM-specific line: in a CommonJS build use `__dirname`.
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 export interface BuildInfo {
   version: string;
@@ -51,7 +55,7 @@ export function formatVersion(name: string, info: BuildInfo): string {
   return `${name} ${info.version} (${info.date ? `${sha} ${info.date}` : sha})`;
 }
 
-export function packageMeta(from: string = dirname(fileURLToPath(import.meta.url))): PackageMeta {
+export function packageMeta(from: string = HERE): PackageMeta {
   let dir = realpathSync(from);
   while (!existsSync(join(dir, "package.json"))) {
     const parent = dirname(dir);
@@ -67,16 +71,20 @@ export function isCheckout(root: string): boolean {
   return existsSync(join(root, ".git"));
 }
 
-export function buildInfo(meta: PackageMeta = packageMeta()): BuildInfo {
+// `runningFrom` is the directory of the running module. In a checkout the stamp describes dist/
+// only; code running from src/ reads git, so a stale build cannot hide newer commits or edits.
+export function buildInfo(meta: PackageMeta = packageMeta(), runningFrom: string = HERE): BuildInfo {
   const stamped = join(meta.root, "dist", "build-info.json");
-  if (existsSync(stamped)) {
+  const checkout = isCheckout(meta.root);
+  const fromDist = (realpathSync(runningFrom) + sep).startsWith(join(meta.root, "dist") + sep);
+  if (existsSync(stamped) && (!checkout || fromDist)) {
     try {
       return JSON.parse(readFileSync(stamped, "utf8")) as BuildInfo;
     } catch {
       // fall through to git
     }
   }
-  if (isCheckout(meta.root)) {
+  if (checkout) {
     const commit = run("git", ["rev-parse", "HEAD"], meta.root);
     if (commit) {
       return {
@@ -98,7 +106,9 @@ export function versionLine(name: string): string {
 export function versionDetails(): Record<string, unknown> {
   const meta = packageMeta();
   const info = buildInfo(meta);
-  return { ...info, install: detectInstall(meta.root, isCheckout(meta.root)), path: meta.root };
+  const checkout = isCheckout(meta.root);
+  const install = detectInstall(meta.root, checkout, checkout ? undefined : run("npm", ["root", "-g"]));
+  return { ...info, install, path: meta.root };
 }
 
 // ── install detection ───────────────────────────────────────────────────────
@@ -121,13 +131,28 @@ export function packageManagerFor(root: string): "pnpm" | "bun" | "npm" {
   return "npm";
 }
 
+// A package.json "repository" (`github:o/r`, `o/r`, `git@host:o/r.git`, `git+https://...`) as a URL
+// git can clone. `gitInstallUrl` is the same URL in the form npm, pnpm and bun install from.
+export function gitCloneUrl(repositoryUrl: string): string {
+  const url = repositoryUrl.trim().replace(/^git\+/, "");
+  const github = /^(?:github:)?([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(url);
+  if (github) return `https://github.com/${github[1]}.git`;
+  const scp = /^([\w.-]+@[\w.-]+):(.+)$/.exec(url);
+  if (scp) return `ssh://${scp[1]}/${scp[2]}`;
+  return url;
+}
+
 export function gitInstallUrl(repositoryUrl: string): string {
-  const url = repositoryUrl.replace(/^git\+/, "");
-  if (url.startsWith("github:")) return `git+https://github.com/${url.slice(7)}.git`;
-  return `git+${url}`;
+  return `git+${gitCloneUrl(repositoryUrl)}`;
 }
 
 export function updateSteps(kind: InstallKind, meta: PackageMeta, pm = packageManagerFor(meta.root)): Step[] | null {
+  // An unpublished package is reinstalled from its repository, never looked up on the registry by name.
+  if (meta.isPrivate && kind !== "checkout") {
+    if (!meta.repositoryUrl || !["npm", "pnpm", "bun"].includes(kind)) return null;
+    const url = gitInstallUrl(meta.repositoryUrl);
+    return [{ cmd: kind, args: kind === "npm" ? ["install", "-g", url] : ["add", "-g", url] }];
+  }
   const spec = `${meta.name}@latest`;
   switch (kind) {
     case "checkout":
@@ -143,9 +168,6 @@ export function updateSteps(kind: InstallKind, meta: PackageMeta, pm = packageMa
     case "pnpm":
       return [{ cmd: "pnpm", args: ["add", "-g", spec] }];
     case "npm":
-      if (meta.isPrivate) {
-        return meta.repositoryUrl ? [{ cmd: "npm", args: ["install", "-g", gitInstallUrl(meta.repositoryUrl)] }] : null;
-      }
       return [{ cmd: "npm", args: ["install", "-g", spec] }];
     default:
       return null;
@@ -180,7 +202,7 @@ export interface UpdateStatus {
 }
 
 function remoteMainCommit(url: string): string | undefined {
-  const line = run("git", ["ls-remote", url.replace(/^git\+/, ""), "refs/heads/main"]);
+  const line = run("git", ["ls-remote", gitCloneUrl(url), "refs/heads/main"]);
   return line?.split(/\s/)[0] || undefined;
 }
 

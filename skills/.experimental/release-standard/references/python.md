@@ -23,7 +23,8 @@ project-owned. It must do, in order:
    (`bash scripts/check-changelog.sh`).
 2. **Bump** (`make bump VERSION=X.Y.Z`): set the version in every place it is
    declared, move Unreleased into `## [X.Y.Z] - YYYY-MM-DD` with a fresh empty
-   Unreleased, and commit `chore: release vX.Y.Z`.
+   Unreleased, and commit `chore: release vX.Y.Z`. The maintainer then pushes
+   it, so the later steps can require `HEAD` to equal `origin/main`.
 3. **Build** from that commit: `python3 scripts/build_info.py
    src/<package>/_build_info.json`, then `uv build`. Install the wheel in a
    throwaway environment and check that `<tool> --version` matches
@@ -55,12 +56,22 @@ project already exports one, and keep it in step with `pyproject.toml`.
 
 - `--version`: print `cli_meta.version_line("<tool>", "<dist>")` and exit 0.
 - `update [--check] [--force]`: `raise typer.Exit(cli_meta.run_update(...))`.
+  For a tool that is not on PyPI pass `published=False`: it then never looks
+  the name up on PyPI (an unrelated package could have it), and updates only
+  through installers that remember the original source (`uv tool`, `pipx`) or
+  from the checkout.
 
 Install detection keys on where the package lives: a source checkout outside
 `site-packages` (editable install), `uv tool`, `pipx`, mise's `pipx:` backend,
-or a plain `pip` environment. An unpublished tool compares the checkout with
-`origin/main`; installs from a git URL update with `uv tool upgrade <dist>`,
-which re-resolves the git source.
+or a plain `pip` environment. A checkout update pulls, then reinstalls the
+editable install with the installer that owns its environment
+(`uv tool install --editable . --reinstall`, `pipx install --editable . --force`
+or `pip install --editable .`), so new dependencies and the installed version
+follow. Installs from a git URL update with `uv tool upgrade <dist>` or
+`pipx upgrade <dist>`, which reinstall from the recorded source.
+
+In a checkout, `--version` reads git (the current commit and `-dirty`); the
+`_build_info.json` stamp is used only by installed wheels.
 
 ## Checking the result
 
