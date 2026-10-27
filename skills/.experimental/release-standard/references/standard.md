@@ -74,7 +74,7 @@ The install method decides both where "latest" comes from and what runs:
 
 | Installed with | Latest is | Update runs |
 |---|---|---|
-| Source checkout (clone + build + link) | `origin/main` | `git pull --ff-only`, install dependencies, build. Refuses when the tree is dirty or not on `main`. |
+| Source checkout (clone + build + link) | `origin/main`, or the checkout's own commit when the build is older | `git pull --ff-only`, install dependencies, build. Refuses when the tree is dirty or not on `main`. |
 | Global npm, pnpm or bun, from the registry | registry `latest` | `npm install -g <pkg>@latest` (or the pnpm/bun equivalent) |
 | Global npm, pnpm or bun from a git URL (unpublished) | remote `main` | `npm install -g <git url>` (or `pnpm add -g`, `bun add -g`) |
 | mise (`npm:` or `pipx:` backend) | registry `latest` | `mise upgrade --bump <backend>:<pkg>` |
@@ -83,7 +83,10 @@ The install method decides both where "latest" comes from and what runs:
 | Anything else | | prints the manual steps, exit 1 |
 
 The tool prints the command before running it and runs it in the foreground,
-so prompts reach the terminal. An unpublished tool never looks its name up on
+so prompts reach the terminal. When a step fails, it says how to finish after
+fixing the cause: run `update` again (a build older than the checkout counts as
+an update, so a failed build after a successful pull is retried), or
+`update --force` where nothing records that the update is unfinished. An unpublished tool never looks its name up on
 a registry, where an unrelated package could have it; when its installer
 cannot reinstall from the original source, `update` says so and stops.
 

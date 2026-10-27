@@ -1,4 +1,4 @@
-"""release-standard: cli_meta.py r1 (see the release standard before editing)
+"""release-standard: cli_meta.py r2 (see the release standard before editing)
 
 Version line and self-update for a Python CLI. Copy into the package, then (Typer):
 
@@ -218,6 +218,11 @@ def run_update(name: str, dist: str, check: bool = False, force: bool = False, p
             return 1
         if code != 0:
             print(f"{name}: `{' '.join(step)}` failed.", file=sys.stderr)
+            if kind == "checkout" and step[0] != "git":
+                # The pull is done, so a plain retry would report "up to date" and skip the reinstall.
+                print(f"Fix the cause, then run `{name} update --force` to finish the update.", file=sys.stderr)
+            else:
+                print(f"Fix the cause, then run `{name} update` again.", file=sys.stderr)
             return 1
     print(f"{name} updated. Check with `{name} --version`.")
     return 0

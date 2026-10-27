@@ -1,4 +1,4 @@
-// release-standard: src/cli-meta.ts r1 (see the release standard before editing)
+// release-standard: src/cli-meta.ts r2 (see the release standard before editing)
 //
 // Version line and self-update for a Node CLI:
 //   program.version(versionLine("mytool"), "-V, --version", "print the version and commit");
@@ -71,19 +71,22 @@ export function isCheckout(root: string): boolean {
   return existsSync(join(root, ".git"));
 }
 
+// The build stamp in dist/, if there is a readable one.
+export function readStamp(root: string): BuildInfo | undefined {
+  try {
+    return JSON.parse(readFileSync(join(root, "dist", "build-info.json"), "utf8")) as BuildInfo;
+  } catch {
+    return undefined;
+  }
+}
+
 // `runningFrom` is the directory of the running module. In a checkout the stamp describes dist/
 // only; code running from src/ reads git, so a stale build cannot hide newer commits or edits.
 export function buildInfo(meta: PackageMeta = packageMeta(), runningFrom: string = HERE): BuildInfo {
-  const stamped = join(meta.root, "dist", "build-info.json");
   const checkout = isCheckout(meta.root);
   const fromDist = (realpathSync(runningFrom) + sep).startsWith(join(meta.root, "dist") + sep);
-  if (existsSync(stamped) && (!checkout || fromDist)) {
-    try {
-      return JSON.parse(readFileSync(stamped, "utf8")) as BuildInfo;
-    } catch {
-      // fall through to git
-    }
-  }
+  const stamp = readStamp(meta.root);
+  if (stamp && (!checkout || fromDist)) return stamp;
   if (checkout) {
     const commit = run("git", ["rev-parse", "HEAD"], meta.root);
     if (commit) {
@@ -198,7 +201,8 @@ export interface UpdateStatus {
   current: string;
   latest?: string;
   available?: boolean; // undefined: could not tell
-  reason?: string;
+  reason?: string; // why it could not tell
+  note?: string; // why an update is available, when it is not a newer version
 }
 
 function remoteMainCommit(url: string): string | undefined {
@@ -216,7 +220,14 @@ export function checkForUpdate(kind: InstallKind, meta: PackageMeta, info: Build
     if (!head || !remote) return { current: meta.version, reason: "could not read the checkout's commits" };
     // Ahead of origin/main is not an update.
     const behind = run("git", ["rev-list", "--count", "HEAD..origin/main"], meta.root);
-    return { current: head.slice(0, 7), latest: remote.slice(0, 7), available: Number(behind) > 0 };
+    if (Number(behind) > 0) return { current: head.slice(0, 7), latest: remote.slice(0, 7), available: true };
+    // Up to date with origin/main, but dist/ was built from another commit: an update whose pull
+    // succeeded and whose install or build failed, or a pull without a rebuild. Rebuilding is the update.
+    const stamp = readStamp(meta.root);
+    if (stamp?.commit && stamp.commit !== head) {
+      return { current: stamp.commit.slice(0, 7), latest: head.slice(0, 7), available: true, note: "the build is older than the checkout" };
+    }
+    return { current: head.slice(0, 7), latest: remote.slice(0, 7), available: false };
   }
   if (meta.isPrivate) {
     const remote = meta.repositoryUrl ? remoteMainCommit(meta.repositoryUrl) : undefined;
@@ -259,7 +270,7 @@ export function runUpdate(name: string, opts: UpdateOptions = {}): number {
     console.log(`${name} is up to date (${status.current}).`);
     return 0;
   } else if (status.available) {
-    console.log(`${name}: update available, ${status.current} → ${status.latest}.`);
+    console.log(`${name}: update available, ${status.current} → ${status.latest}${status.note ? ` (${status.note})` : ""}.`);
   }
   if (opts.check) return status.available ? 1 : 0;
 
@@ -281,6 +292,7 @@ export function runUpdate(name: string, opts: UpdateOptions = {}): number {
     const r = spawnSync(step.cmd, step.args, { cwd: step.cwd, stdio: "inherit" });
     if (r.status !== 0) {
       console.error(`${name}: \`${show(step)}\` failed${r.error ? ` (${r.error.message})` : ""}.`);
+      console.error(`Fix the cause, then run \`${name} update\` again.`);
       return 1;
     }
   }

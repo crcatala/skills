@@ -84,6 +84,13 @@ release-it finishes, with the terminal attached so 2FA prompts work. Do not
 move the publish into a release-it hook: hooks do not get an interactive
 terminal.
 
+Because release-it no longer publishes, it no longer applies a dist-tag either.
+`release.mjs` does: a prerelease such as `1.3.0-beta.0` is published with
+`--tag beta` (`--tag next` for a bare `1.3.0-0`), so it never becomes `latest`;
+npm 11 refuses to publish a prerelease without a tag anyway. A release passes
+no tag (`latest`). `--npm.tag=<tag>` on `release`, or `--tag <tag>` on
+`release:publish`, overrides it.
+
 ## Version and update in the CLI
 
 With commander:
