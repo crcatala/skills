@@ -53,6 +53,14 @@ In order, `npm run release`:
 5. creates the GitHub Release;
 6. publishes to npm from the tagged commit (npm may ask for a one-time password).
 
+A prerelease is published under a dist-tag named after its identifier, so
+`latest` keeps pointing at the last full release:
+
+```bash
+npm run release -- --preRelease=beta    # 1.3.0-beta.0, published as <pkg>@beta
+npm run release -- --preRelease=beta --npm.tag=next    # same version, under "next"
+```
+
 ## When a step fails
 
 - **Before the commit** (steps 1–3): nothing was changed on the remote. Fix the
@@ -63,7 +71,8 @@ In order, `npm run release`:
   (`gh release create vX.Y.Z --title vX.Y.Z --notes-file <section>`), then run
   `npm run release:publish`.
 - **npm publish** (step 6): the tag is pushed; only the publish is left. Run
-  `npm run release:publish` from the tagged commit.
+  `npm run release:publish` from the tagged commit (it picks the prerelease
+  dist-tag again; `npm run release:publish -- --tag <tag>` chooses another).
 
 ## Verify
 

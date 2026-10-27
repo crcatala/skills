@@ -9,6 +9,7 @@ import { after, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   buildInfo,
+  checkForUpdate,
   compareVersions,
   detectInstall,
   formatVersion,
@@ -160,6 +161,38 @@ describe("packageMeta and buildInfo", () => {
     const root = mkTemp();
     writeFileSync(join(root, "package.json"), JSON.stringify({ name: "t", version: "0.1.0" }));
     assert.deepEqual(buildInfo(packageMeta(root)), { version: "0.1.0" });
+  });
+});
+
+describe("checkForUpdate in a checkout", () => {
+  // A clone of a one-commit origin, with dist/ stamped at `stampAt` (a commit id or "head").
+  const clone = (stampAt: "head" | string) => {
+    const origin = mkTemp();
+    writeFileSync(join(origin, "package.json"), JSON.stringify({ name: "t", version: "0.1.0" }));
+    writeFileSync(join(origin, ".gitignore"), "dist/\n");
+    sh(origin, "git", ["init", "-q", "-b", "main"]);
+    sh(origin, "git", ["add", "-A"]);
+    sh(origin, "git", ["commit", "-q", "-m", "init"]);
+    const root = join(mkTemp(), "clone");
+    sh(origin, "git", ["clone", "-q", origin, root]);
+    const head = sh(root, "git", ["rev-parse", "HEAD"]);
+    mkdirSync(join(root, "dist"));
+    const commit = stampAt === "head" ? head : stampAt;
+    writeFileSync(join(root, "dist", "build-info.json"), JSON.stringify({ version: "0.1.0", commit, date: "2026-01-01", dirty: false }));
+    const m = packageMeta(root);
+    return { m, head, status: () => checkForUpdate("checkout", m, buildInfo(m, join(root, "dist"))) };
+  };
+  test("current build: up to date", () => {
+    const { status } = clone("head");
+    assert.equal(status().available, false);
+  });
+  test("build older than the checkout (pull done, build failed): update available", () => {
+    const { status, head } = clone("a".repeat(40));
+    const s = status();
+    assert.equal(s.available, true);
+    assert.equal(s.current, "aaaaaaa");
+    assert.equal(s.latest, head.slice(0, 7));
+    assert.match(s.note ?? "", /build is older/);
   });
 });
 
