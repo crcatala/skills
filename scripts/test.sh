@@ -4,6 +4,7 @@
 #   - skills/*/test_*.py              Python unit tests bundled with a skill (stdlib unittest, run via uv);
 #                                     experimental skills under skills/.experimental/ included
 #   - skills/brave-web/test/*.test.js Node tests (installs deps from the lockfile if missing)
+#   - skills/.experimental/release-standard/test/*.test.ts  Node tests (Node 22.18+ runs TypeScript directly)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -39,6 +40,12 @@ if [ -d skills/brave-web/test ]; then
         [ -d node_modules ] || npm ci --no-audit --no-fund --silent
         node --test test/*.test.js
     )
+fi
+
+release_standard=skills/.experimental/release-standard
+if [ -d "$release_standard/test" ]; then
+    echo "• $release_standard (node --test)"
+    (cd "$release_standard" && node --test test/*.test.ts)
 fi
 
 echo "all tests passed"

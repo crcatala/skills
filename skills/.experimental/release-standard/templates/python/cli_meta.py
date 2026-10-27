@@ -1,0 +1,198 @@
+"""release-standard: cli_meta.py r1 (see the release standard before editing)
+
+Version line and self-update for a Python CLI. Copy into the package, then (Typer):
+
+    from . import cli_meta
+
+    def _version(value: bool) -> None:
+        if value:
+            typer.echo(cli_meta.version_line("mytool", "my-dist"))
+            raise typer.Exit()
+
+    @app.command()
+    def update(check: bool = False, force: bool = False) -> None:
+        raise typer.Exit(cli_meta.run_update("mytool", "my-dist", check=check, force=force))
+
+The build stamps _build_info.json next to this file (scripts/build_info.py). Without it, a run
+from a git checkout reads git directly, and anything else prints the version alone.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import urllib.request
+from importlib import metadata
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+
+def _run(args: list[str], cwd: Path | None = None) -> str | None:
+    try:
+        return subprocess.run(args, cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+# ── version ─────────────────────────────────────────────────────────────────
+
+
+def format_version(name: str, info: dict) -> str:
+    if not info.get("commit"):
+        return f"{name} {info['version']}"
+    sha = info["commit"][:7] + ("-dirty" if info.get("dirty") else "")
+    return f"{name} {info['version']} ({sha} {info['date']})" if info.get("date") else f"{name} {info['version']} ({sha})"
+
+
+def checkout_root(package_dir: Path = HERE) -> Path | None:
+    """The source checkout this module runs from, or None for an installed copy."""
+    if "site-packages" in package_dir.parts or "dist-packages" in package_dir.parts:
+        return None
+    top = _run(["git", "rev-parse", "--show-toplevel"], cwd=package_dir)
+    return Path(top) if top and (Path(top) / "pyproject.toml").exists() else None
+
+
+def build_info(dist: str, package_dir: Path = HERE) -> dict:
+    try:
+        version = metadata.version(dist)
+    except metadata.PackageNotFoundError:
+        version = "unknown"
+    info: dict = {"version": version}
+    stamp = package_dir / "_build_info.json"
+    if stamp.exists():
+        try:
+            return {**info, **json.loads(stamp.read_text())}
+        except ValueError:
+            pass
+    root = checkout_root(package_dir)
+    commit = _run(["git", "rev-parse", "HEAD"], cwd=root) if root else None
+    if commit:
+        info["commit"] = commit
+        info["date"] = _run(["git", "show", "-s", "--format=%cs", "HEAD"], cwd=root)
+        info["dirty"] = _run(["git", "status", "--porcelain"], cwd=root) != ""
+    return info
+
+
+def version_line(name: str, dist: str) -> str:
+    return format_version(name, build_info(dist))
+
+
+# ── install detection ───────────────────────────────────────────────────────
+
+
+def detect_install(package_dir: str, checkout: bool) -> str:
+    if checkout:
+        return "checkout"
+    p = package_dir.replace("\\", "/")
+    if "/uv/tools/" in p:
+        return "uv"
+    if "/mise/installs/pipx-" in p:
+        return "mise"
+    if "/pipx/venvs/" in p:
+        return "pipx"
+    if "/site-packages/" in p or "/dist-packages/" in p:
+        return "pip"
+    return "unknown"
+
+
+def update_steps(kind: str, dist: str, python: str = sys.executable) -> list[list[str]] | None:
+    return {
+        "checkout": [["git", "pull", "--ff-only"]],
+        "uv": [["uv", "tool", "upgrade", dist]],
+        "mise": [["mise", "upgrade", "--bump", f"pipx:{dist}"]],
+        "pipx": [["pipx", "upgrade", dist]],
+        "pip": [[python, "-m", "pip", "install", "--upgrade", dist]],
+    }.get(kind)
+
+
+# ── latest version ──────────────────────────────────────────────────────────
+
+
+def compare_versions(a: str, b: str) -> int:
+    """Negative when a < b. Plain X.Y.Z; a prerelease sorts before its release."""
+
+    def parse(v: str) -> tuple[list[int], str | None]:
+        core, _, pre = v.lstrip("v").partition("-")
+        nums = [int(n) if n.isdigit() else 0 for n in core.split(".")[:3]]
+        return nums + [0] * (3 - len(nums)), pre or None
+
+    (x, xp), (y, yp) = parse(a), parse(b)
+    if x != y:
+        return -1 if x < y else 1
+    if xp == yp:
+        return 0
+    if xp is None:
+        return 1
+    if yp is None:
+        return -1
+    return -1 if xp < yp else 1
+
+
+def pypi_latest(dist: str) -> str | None:
+    try:
+        with urllib.request.urlopen(f"https://pypi.org/pypi/{dist}/json", timeout=10) as r:
+            return json.load(r)["info"]["version"]
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def check_for_update(kind: str, dist: str, info: dict, root: Path | None) -> dict:
+    """{'current', 'latest', 'available' (None when unknown), 'reason'}."""
+    if kind == "checkout" and root:
+        if _run(["git", "fetch", "--quiet", "origin", "main"], cwd=root) is None:
+            return {"current": info["version"], "available": None, "reason": "could not fetch origin/main"}
+        behind = _run(["git", "rev-list", "--count", "HEAD..origin/main"], cwd=root)
+        head = _run(["git", "rev-parse", "--short=7", "HEAD"], cwd=root)
+        remote = _run(["git", "rev-parse", "--short=7", "origin/main"], cwd=root)
+        return {"current": head, "latest": remote, "available": behind not in (None, "0")}
+    latest = pypi_latest(dist)
+    if not latest:
+        reason = "no latest version from PyPI; if this tool is unpublished, `update --force` reinstalls it"
+        return {"current": info["version"], "available": None, "reason": reason}
+    return {"current": info["version"], "latest": latest, "available": compare_versions(info["version"], latest) < 0}
+
+
+# ── update command ──────────────────────────────────────────────────────────
+
+
+def run_update(name: str, dist: str, check: bool = False, force: bool = False) -> int:
+    """Exit code: see the release standard's update table."""
+    root = checkout_root()
+    kind = detect_install(str(HERE), root is not None)
+    info = build_info(dist)
+    status = check_for_update(kind, dist, info, root)
+
+    if status["available"] is None:
+        print(f"{name}: cannot tell whether an update is available ({status['reason']}).", file=sys.stderr)
+        if check or not force:
+            return 2
+    elif not status["available"] and not force:
+        print(f"{name} is up to date ({status['current']}).")
+        return 0
+    elif status["available"]:
+        print(f"{name}: update available, {status['current']} → {status['latest']}.")
+    if check:
+        return 1 if status["available"] else 0
+
+    steps = update_steps(kind, dist)
+    if steps is None:
+        print(f"{name}: installed at {HERE}, which is not a recognized install method.", file=sys.stderr)
+        print(f"Update it the way it was installed, for example `uv tool upgrade {dist}`.", file=sys.stderr)
+        return 1
+    if kind == "checkout":
+        branch = _run(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], cwd=root)
+        dirty = _run(["git", "status", "--porcelain"], cwd=root) != ""
+        if branch != "main" or dirty:
+            print(f"{name}: the checkout at {root} must be clean and on main to update.", file=sys.stderr)
+            return 1
+    for step in steps:
+        print("$ " + " ".join(step))
+        if subprocess.run(step, cwd=root if kind == "checkout" else None).returncode != 0:
+            print(f"{name}: `{' '.join(step)}` failed.", file=sys.stderr)
+            return 1
+    if kind == "checkout":
+        print("Pulled. If dependencies changed, reinstall the tool from the checkout.")
+    print(f"{name} updated. Check with `{name} --version`.")
+    return 0
