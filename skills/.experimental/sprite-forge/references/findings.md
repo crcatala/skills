@@ -65,5 +65,34 @@ office worker, a robot and a walking-ham mascot. Numbers below are from that set
 
 - Paper-doll characters (one hand-made or bought base body with generated accessories) may suit a large
   generated cast better; video suits a few named characters and big moments.
-- Dedicated pixel-art models (PixelLab, Retro Diffusion) output true grids and may skip most of this
-  clean-up; untested.
+- A `native` input mode for art that is already 1:1, and an optional PixelLab backend (see below).
+
+## Compared with PixelLab and Retro Diffusion
+
+Same set, same cases, 29 October 2026, through each service's REST v2 API. Cost: $3.56 on Retro
+Diffusion and 26 free PixelLab generations (about $0.009 each at credit prices).
+
+- **Both give a true grid**: 1 image pixel = 1 art pixel, no semi-transparent pixels. **Don't run
+  forge.py on their output**: it reads 1px detail as 4-7px blocks and shrinks a sprite to a smudge,
+  and `pixel: 1` makes it enlarge by a non-integer factor. A native mode should skip grid recovery
+  and keep the atlas, animations and review page.
+- **From text, neither matches our look.** PixelLab's standard mode ignored "chibi"; its v3 is chibi
+  but detailed (54 colours). Retro Diffusion drew realistic people, and a pig for the ham. PixelLab v3
+  without a reference draws only humanoids.
+- **From our finished sprite, both stay on model**, keep our 2×2 blocks and both eyes:
+  PixelLab `create-character-v3` with a reference (4 directions, 1 generation) and Retro Diffusion
+  `rd_advanced_animation__rotate` (8 views, $0.10).
+- **Walks from our sprite beat Grok video.** PixelLab v3 custom animation kept our exact pixels with
+  calm arms toward the camera (2 generations a direction; one direction tested). Retro Diffusion
+  `rd_advanced_animation__walking` was close ($0.14 a direction). PixelLab template walks are 1
+  generation a direction but redraw on a skeleton: smaller head, thinner outline.
+- **Props: keep sheets.** One $0.01 sheet keeps one scale. RD Pro with the worker as a reference
+  matched his outline ($0.18 each) but each prop fills its canvas, so relative size is lost. PixelLab
+  Pixen props were busy and off-style; Bitforge with a style image redrew the worker.
+- **Tiles: PixelLab.** `create-tileset` (1 generation) makes Wang sets, and `transition_size: 1.0`
+  gives raised walls. Retro Diffusion tilesets are flat two-texture blends: no walls.
+- **Practicalities.** PixelLab's free tier runs one job and one direction at a time (1-5 min each);
+  its ZIP export dropped frames (use the frame URLs), and its usage field reports a USD price even
+  when the trial charges generations. Retro Diffusion runs in parallel and has a free `check_cost`,
+  but RD Pro failed 4 of 14 attempts, mostly under parallel load (refunded). Both allow commercial
+  use; neither allows training other models on outputs; Retro Diffusion may train on yours.
