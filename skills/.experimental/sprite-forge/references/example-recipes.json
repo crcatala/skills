@@ -1,0 +1,44 @@
+{
+  "style": "16-bit pixel art game sprites in the style of Stardew Valley, top-down three-quarter view (camera above and in front), chunky readable shapes, crisp hard-edged pixels, flat colours with simple 2-tone shading, a dark 1-pixel outline around each sprite, no anti-aliasing, no gradients, no drop shadows, no text or labels. Each sprite is isolated on a transparent background, with plenty of empty space between sprites, laid out evenly in a grid.",
+  "recipes": [
+    {
+      "id": "staff-turnaround",
+      "kind": "character",
+      "grid": [4, 1],
+      "names": ["down", "left", "right", "up"],
+      "prompt": "One office worker character shown 4 times in a single row, a character turnaround for a top-down RPG: facing the camera, facing left, facing right, facing away from the camera. Cute chibi proportions (big head, small body) like Stardew Valley villagers. Short brown hair, orange hoodie, dark blue trousers, brown shoes. Exactly the same character, size and proportions in all 4, standing, feet on the same baseline."
+    },
+    {
+      "id": "robot-turnaround",
+      "kind": "character",
+      "grid": [4, 1],
+      "names": ["down", "left", "right", "up"],
+      "reference": "staff-turnaround",
+      "prompt": "A new character in exactly the same pixel size, height, proportions and style as the attached office worker: a friendly little office robot with a boxy grey body, a screen face with two cyan eyes, a short antenna with a red light and small stubby legs. Shown 4 times in a single row as a top-down RPG turnaround: facing the camera, facing left, facing right, facing away from the camera. Same height as the reference character, feet on the same baseline."
+    },
+    {
+      "id": "office-props",
+      "kind": "props",
+      "grid": [3, 2],
+      "names": ["espresso-machine", "potted-plant", "arcade-cabinet", "server-rack", "water-cooler", "trophy"],
+      "reference": "staff-turnaround",
+      "prompt": "Draw new props that match the attached character sheet exactly: the same pixel size (each art pixel the same size as in the reference), the same outline and shading style, and to scale with that character (he is about 34 pixels tall, so a counter is about half his height). Six cosy office props, 3 columns by 2 rows, without the character: a chrome espresso machine on a small wooden counter, a leafy potted plant in a terracotta pot, a retro arcade cabinet with a glowing screen; a tall black server rack with small green status lights, an office water cooler with a blue bottle, a small gold trophy on a wooden base."
+    },
+    {
+      "id": "campus-props",
+      "kind": "props",
+      "grid": [3, 2],
+      "names": ["kitchen-stove", "merge-bell", "delivery-box", "park-bench", "food-cart", "lamp-post"],
+      "prompt": "Six props for a small cartoon office campus, 3 columns by 2 rows. Top row: a small kitchen stove with a steaming red pot on it, a brass bell hanging in a little wooden frame on a post, a cardboard delivery box with packing tape. Bottom row: a wooden park bench, a yellow food cart with a red striped awning, a black iron street lamp post.",
+      "reference": "staff-turnaround"
+    },
+    {
+      "id": "mascot",
+      "kind": "character",
+      "grid": [4, 1],
+      "names": ["down", "left", "right", "up"],
+      "prompt": "In the same pixel size and style as the attached character, the studio mascot: a cute walking ham-on-the-bone character (a pink ham with a white bone sticking out of the top like a tuft of hair, little stubby arms and legs, small happy face), shown 4 times in a single row as a top-down RPG turnaround: facing the camera, facing left, facing right, facing away from the camera. Exactly the same character, size and proportions in all 4, standing, feet on the same baseline.",
+      "reference": "staff-turnaround"
+    }
+  ]
+}
