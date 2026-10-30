@@ -21,6 +21,7 @@ python_test_deps() {
     case "$1" in
         skills/grok-research) echo "pydantic" ;;
         skills/.experimental/repo-icons) echo "pillow" ;;
+        skills/.experimental/sprite-forge) echo "numpy pillow" ;;
     esac
 }
 

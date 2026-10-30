@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sprite-forge review</title>
+<style>
+  body{margin:0;background:#1b1611;color:#f4ecd8;font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  main{max-width:1120px;margin:0 auto;padding:24px 20px 60px}
+  h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:34px 0 10px;color:#e0a95c}
+  p{color:#d8ccb4;max-width:860px;margin:6px 0}.muted{color:#9c8c74}
+  canvas{image-rendering:pixelated;display:block}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+  .card{background:#261f18;border:1px solid #3d3024;border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:6px}
+  .card .row{display:flex;align-items:flex-end;gap:10px;min-height:60px;flex-wrap:wrap}
+  .chk{background-image:linear-gradient(45deg,#3a3028 25%,transparent 25%,transparent 75%,#3a3028 75%),linear-gradient(45deg,#3a3028 25%,#2e261f 25%,#2e261f 75%,#3a3028 75%);background-size:8px 8px;background-position:0 0,4px 4px;border-radius:4px}
+  .takes{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start;margin:6px 0 16px}.take{align-items:flex-start}.take.picked{border-color:#e0a95c}
+  .flip{display:inline-grid}.flip img{grid-area:1/1;visibility:hidden;image-rendering:pixelated;align-self:end;justify-self:center}.flip img.on{visibility:visible}
+  .card b{font-weight:normal;font-size:12px}.card small{color:#9c8c74;font-size:11px;word-break:break-word}.card .fix{color:#e0a95c}
+  .raws{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+  figure{margin:0;background:#261f18;border:1px solid #3d3024;border-radius:8px;padding:8px}
+  figure img{width:100%;display:block;border-radius:4px;background:#2e261f}
+  figcaption{font-size:12px;color:#9c8c74;margin-top:4px}
+  details{background:#261f18;border:1px solid #3d3024;border-radius:8px;padding:8px 12px;margin:6px 0}
+  summary{cursor:pointer;color:#e0a95c}
+</style>
+</head>
+<body>
+<main>
+  <h1>sprite-forge review</h1>
+  <p class="muted">Check: faces and eyes intact, outlines clean, sizes sensible next to the reference character, animations steady.</p>
+  <h2>Animations</h2>
+  <div class="grid" id="anims"></div>
+  <h2 id="takes-h" hidden>Takes</h2>
+  <p id="takes-p" class="muted" hidden>Every take of each generated animation. Pick another with <code>rd_anim.py --pick &lt;name&gt; &lt;take&gt;</code>, then rerun forge.py.</p>
+  <div id="takes"></div>
+  <h2>Every sprite, 1× and 3×</h2>
+  <div class="grid" id="sprites"></div>
+  <h2>What the model returned</h2>
+  <div class="raws">
+<!--RAW-->
+  </div>
+  <h2>Recipes</h2>
+  <div id="recipes"></div>
+</main>
+<img id="atlas" src="atlas.png" alt="" hidden>
+<script>
+const DATA = /*DATA*/null;
+const atlas = document.getElementById('atlas');
+const F = DATA.sheet.frames, A = DATA.sheet.animations;
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+function blit(c, key, x, y) { const f = F[key].frame; c.drawImage(atlas, f.x, f.y, f.w, f.h, Math.round(x), Math.round(y), f.w, f.h); }
+function sized(cv, w, h, s) { cv.width = w; cv.height = h; cv.style.width = w * s + 'px'; cv.style.height = h * s + 'px'; const c = cv.getContext('2d'); c.imageSmoothingEnabled = false; return c; }
+function still(key, s) { const f = F[key].frame, cv = el('canvas', 'chk'); blit(sized(cv, f.w, f.h, s), key, 0, 0); return cv; }
+const fpsOf = name => (DATA.report[A[name][0]] || {}).fps;
+const periodOf = name => { const m = /"period_s": ([\d.]+)/.exec((DATA.report[A[name][0]] || {}).fixed || ''); return m ? +m[1] : null; };
+const players = [], flips = [];
+function start() {
+  const anims = document.getElementById('anims');
+  for (const [name, keys] of Object.entries(A)) {
+    const w = Math.max(...keys.map(k => F[k].frame.w)), h = Math.max(...keys.map(k => F[k].frame.h));
+    const p = periodOf(name), fps = fpsOf(name) || (p ? keys.length / p : name.includes('walk') ? 6 : 1.5);
+    const cv = el('canvas', 'chk'), c = sized(cv, w, h, 3), card = el('div', 'card');
+    players.push({ c, keys, fps, w, h });
+    card.append(cv, el('b', '', name), el('small', '', `${keys.length} frames · ${fps.toFixed(1)} fps${p ? ' · from video' : ''}`));
+    anims.append(card);
+  }
+  const T = DATA.takes || {}, tk = document.getElementById('takes');
+  if (Object.keys(T).length) { document.getElementById('takes-h').hidden = false; document.getElementById('takes-p').hidden = false; }
+  for (const [name, a] of Object.entries(T)) {
+    tk.append(el('b', '', name));
+    if (a.mirror) { tk.append(el('p', 'muted', `Mirror of ${a.mirror}: follows its pick.`)); continue; }
+    const prompts = [...new Set(Object.values(a.takes).map(v => v.prompt).filter(Boolean))];
+    if (prompts.length === 1) tk.append(el('p', 'muted', prompts[0]));
+    const row = el('div', 'takes'); tk.append(row);
+    for (const [t, v] of Object.entries(a.takes)) {
+      const card = el('div', 'card take' + (t === a.pick && !a.mirror ? ' picked' : '')), flip = el('span', 'flip chk');
+      for (const f of v.frames) { const im = el('img'); im.src = f; im.style.zoom = 3; flip.append(im); }
+      flips.push(flip);
+      const bits = [t === a.pick ? `${t} (picked)` : t, v.cost_usd != null ? `$${v.cost_usd}` : '', v.seconds ? `${v.seconds}s` : ''].filter(Boolean);
+      card.append(flip, el('small', '', bits.join(' · ')));
+      if (v.prompt && prompts.length > 1) card.append(el('small', '', v.prompt));
+      row.append(card);
+    }
+  }
+  const grid = document.getElementById('sprites');
+  for (const key of Object.keys(F)) {
+    const r = DATA.report[key] || {}, card = el('div', 'card'), row = el('div', 'row');
+    row.append(still(key, 1), still(key, 3)); card.append(row, el('b', '', key));
+    if (r.detected_pixel) card.append(el('small', '', `${F[key].frame.w}×${F[key].frame.h}px · model pixel ≈${r.detected_pixel}px · ${r.colours} colours`));
+    if (r.fixed && !r.fixed.startsWith('from Grok')) card.append(el('small', 'fix', r.fixed));
+    grid.append(card);
+  }
+  const rec = document.getElementById('recipes');
+  for (const r of DATA.recipes) {
+    const d = el('details'); d.append(el('summary', '', `${r.id} (${r.kind})`), el('p', '', r.prompt));
+    if (r.note) d.append(el('p', 'muted', 'Note: ' + r.note)); rec.append(d);
+  }
+  let last = 0;
+  (function tick(now) {
+    requestAnimationFrame(tick); if (now - last < 33) return; last = now; const t = now / 1000;
+    for (const fl of flips) { const im = fl.children; for (let i = 0; i < im.length; i++) im[i].classList.toggle('on', i === Math.floor(t * 8) % im.length); }
+    for (const p of players) { p.c.clearRect(0, 0, p.w, p.h); const k = p.keys[Math.floor(t * p.fps) % p.keys.length], f = F[k].frame; blit(p.c, k, Math.round((p.w - f.w) / 2), p.h - f.h); }
+  })(0);
+}
+atlas.complete ? start() : atlas.addEventListener('load', start);
+</script>
+</body>
+</html>
