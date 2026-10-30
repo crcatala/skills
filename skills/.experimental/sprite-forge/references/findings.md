@@ -31,7 +31,7 @@ office worker, a robot and a walking-ham mascot. Numbers below are from that set
 | **Drop pixels under alpha 160.** | Removes the model's halo without eating outlines. |
 | **Every recipe after the first takes a `reference`.** | Only reliable way found to keep pixel size and style consistent across batches. |
 | **Fix model mistakes in the recipe, not by hand** (`fix: mirror`, `max`). | The set stays reproducible from `recipes.json` + `raw/`. |
-| **Walk cycles from video, looped.** | Grok Imagine Video 1.5 with the first and last frame pinned to the same image gives a clean loop. Smoother and more varied than image-model frames. |
+| **Walk cycles from video, looped.** | Grok Imagine Video 1.5 with the first and last frame pinned to the same image gives a clean loop. Smoother and more varied than image-model frames. Since beaten on price per try by Retro Diffusion (see the comparison below). |
 | **Animate only from a finished sprite.** | Round 2 clips came from sprites with broken eyes and kept them in every frame; round 3 clips from fixed sprites kept the face. |
 | **Video frames: snap to the source sprite's colours, lock the head.** | Snapping removes the video's colour drift (no flicker). The head lock pastes the original head onto each frame so the face cannot drift; it changed little on good clips but costs nothing. |
 | **Take 8 evenly spaced frames from one cycle in the middle of the clip.** | The pinned start and end ease in and out; the cycle period is found from frame similarity. |
@@ -65,27 +65,43 @@ office worker, a robot and a walking-ham mascot. Numbers below are from that set
 
 - Paper-doll characters (one hand-made or bought base body with generated accessories) may suit a large
   generated cast better; video suits a few named characters and big moments.
-- A `native` input mode for art that is already 1:1, and an optional PixelLab backend (see below).
+- A `native` input mode for art that is already 1:1, and an optional Retro Diffusion walk backend (see
+  below).
+- forge.py picks a pixel size per view, so one character's views can come out at different heights
+  (82px facing the camera, 67px side on, from a sheet whose four figures are the same height). A
+  recipe's `pixel` only seeds the search, which moves away from it; pinning the size per recipe fixed it.
 
-## Compared with PixelLab and Retro Diffusion
+## Compared with PixelLab, Retro Diffusion and Sprite Fusion
 
-Same set, same cases, 29 October 2026, through each service's REST v2 API. Cost: $3.56 on Retro
-Diffusion and 26 free PixelLab generations (about $0.009 each at credit prices).
+Same set, through each service's REST API, 29 October 2026, in two rounds: the cases above on PixelLab
+(v2) and Retro Diffusion (v2), then walks for three new characters (a long-haired staffer, a courier, a
+cat) on those two and Sprite Fusion (v1), two runs each where credits allowed. Cost: $5.24 on Retro
+Diffusion, 38 free PixelLab generations (about $0.009 each at credit prices) and 300 Sprite Fusion
+credits.
 
-- **Both give a true grid**: 1 image pixel = 1 art pixel, no semi-transparent pixels. **Don't run
+- **All three give a true grid**: 1 image pixel = 1 art pixel, no semi-transparent pixels. **Don't run
   forge.py on their output**: it reads 1px detail as 4-7px blocks and shrinks a sprite to a smudge,
   and `pixel: 1` makes it enlarge by a non-integer factor. A native mode should skip grid recovery
   and keep the atlas, animations and review page.
-- **From text, neither matches our look.** PixelLab's standard mode ignored "chibi"; its v3 is chibi
-  but detailed (54 colours). Retro Diffusion drew realistic people, and a pig for the ham. PixelLab v3
-  without a reference draws only humanoids.
+- **From text, neither PixelLab nor Retro Diffusion matches our look** (Sprite Fusion untested).
+  PixelLab's standard mode ignored "chibi"; its v3 is chibi but detailed (54 colours). Retro Diffusion
+  drew realistic people, and a pig for the ham. PixelLab v3 without a reference draws only humanoids.
 - **From our finished sprite, both stay on model**, keep our 2×2 blocks and both eyes:
   PixelLab `create-character-v3` with a reference (4 directions, 1 generation) and Retro Diffusion
-  `rd_advanced_animation__rotate` (8 views, $0.10).
-- **Walks from our sprite beat Grok video.** PixelLab v3 custom animation kept our exact pixels with
-  calm arms toward the camera (2 generations a direction; one direction tested). Retro Diffusion
-  `rd_advanced_animation__walking` was close ($0.14 a direction). PixelLab template walks are 1
-  generation a direction but redraw on a skeleton: smaller head, thinner outline.
+  `rd_advanced_animation__rotate` (8 views, $0.10). PixelLab keeps the view it is given exactly but
+  redraws the others: on the new cast, shorter hair side on and a crouching cat.
+- **Walks: Retro Diffusion, and regenerate rather than fix.** Over five characters every service gave
+  good and bad runs, so choose on price per try. `rd_advanced_animation__walking` from our sprite
+  ($0.14 a direction, 2-5 min) worked 16 of 16 times, kept our palette (8-16 colours) and was the only
+  one to add secondary motion unasked: hair sways, a tail curls, the cat blinks.
+- **Sprite Fusion `animate` from our sprite is close** (15 credits, 15-50 s, in parallel), but skip
+  the `edit` into a walking pose its guide recommends: 3 of 6 edits returned a pose at the wrong size
+  or redrawn, and the animation inherits it. **PixelLab v3 custom walks** (2 generations a direction)
+  add detail (44-61 colours against our 13-17) and walk from its own redrawn side views; its template
+  walks are 1 generation but redraw on a skeleton: smaller head, thinner outline.
+- **Per walk direction**: Retro Diffusion $0.14; Grok video $0.34 plus keying, cycle detection and
+  colour snapping; Sprite Fusion $0.25-0.50 depending on plan ($0.50-1.00 with the pose edit);
+  PixelLab 2 generations. Mirror a side walk for the other side on any of them.
 - **Props: keep sheets.** One $0.01 sheet keeps one scale. RD Pro with the worker as a reference
   matched his outline ($0.18 each) but each prop fills its canvas, so relative size is lost. PixelLab
   Pixen props were busy and off-style; Bitforge with a style image redrew the worker.
@@ -94,5 +110,9 @@ Diffusion and 26 free PixelLab generations (about $0.009 each at credit prices).
 - **Practicalities.** PixelLab's free tier runs one job and one direction at a time (1-5 min each);
   its ZIP export dropped frames (use the frame URLs), and its usage field reports a USD price even
   when the trial charges generations. Retro Diffusion runs in parallel and has a free `check_cost`,
-  but RD Pro failed 4 of 14 attempts, mostly under parallel load (refunded). Both allow commercial
-  use; neither allows training other models on outputs; Retro Diffusion may train on yours.
+  but RD Pro failed 4 of 14 attempts, mostly under parallel load (refunded); its walk and rotate
+  styles never failed. Sprite Fusion is built for agents (one `POST /generate` that streams events),
+  runs in parallel, trims output to the sprite, and sells credits by subscription ($9-49 a month for
+  450-3,000) or top-up ($5 for 150). All three allow commercial use and forbid training other models
+  on outputs; Retro Diffusion may train on yours, and Sprite Fusion may show work made with free
+  credits in its public gallery.
