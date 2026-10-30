@@ -7,17 +7,19 @@
 
     cd <sprite set>; uv run {baseDir}/scripts/forge.py [recipes.json]
 
-Reads raw/<recipe>.png (made by the image-gen skill from recipes.json) and writes out/:
+Reads raw/<recipe>.png (made by the image-gen skill from recipes.json), video/extracted/ (Grok walks)
+and anim/ (true pixel-art frames from rd_anim.py, packed as they are) and writes out/:
   sprites/<recipe>/<name>.png   each sprite at 1x
   atlas.png + atlas.json        one packed sheet in PixiJS's spritesheet format, with animations
   report.json                   detected pixel size, scale and final size per sprite
-  index.html                    review page: every sprite, the animations, the raw sheets, the recipes
+  takes/                        every take of each anim/ animation, for the review page
+  index.html                    review page: every sprite, the animations and their takes, the raw sheets, the recipes
 
 Each sprite keeps the model's own pixel grid (found per sprite) and its own colours, cleaned up.
 Resampling to a different size redraws pixel art badly, so the only resize is an exact 2x shrink,
 and only when a recipe's "max" says the model drew something far too big.
 """
-import json, sys, os, collections, glob
+import json, sys, os, collections, glob, pathlib
 import numpy as np
 from PIL import Image
 
@@ -96,9 +98,10 @@ def pixel_period(rgb, mask):
     return float(np.median(near))
 
 
-def refine_grid(rgb, mask, p0):
+def refine_grid(rgb, mask, p0, fixed=False):
     """Search pixel size and phase near the estimate for the grid whose lines sit on colour edges.
-    Scores edge energy on the grid lines minus halfway between them, so a grid twice too fine loses."""
+    Scores edge energy on the grid lines minus halfway between them, so a grid twice too fine loses.
+    fixed: keep the size p0 and search only the phase."""
     dx = (np.abs(np.diff(rgb, axis=1)).sum(2) * (mask[:, 1:] & mask[:, :-1])).sum(0).astype(float)
     dy = (np.abs(np.diff(rgb, axis=0)).sum(2) * (mask[1:, :] & mask[:-1, :])).sum(1).astype(float)
 
@@ -111,7 +114,7 @@ def refine_grid(rgb, mask, p0):
             top = max(top, (on - off, ph))
         return top
     best = None
-    for p in np.arange(p0 * 0.8, p0 * 1.25, 0.05):
+    for p in [p0] if fixed else np.arange(p0 * 0.8, p0 * 1.25, 0.05):
         (sx, phx), (sy, phy) = fit(dx, p), fit(dy, p)
         if best is None or sx + sy > best[0]:
             best = (sx + sy, float(p), phx + 1, phy + 1)  # diff index i is the boundary before pixel i+1
@@ -184,6 +187,40 @@ def tidy(a):
     return a[ys.min():ys.max() + 1, xs.min():xs.max() + 1] if len(ys) else a
 
 
+def bottom_align(frames):
+    """Frames of one animation on a shared canvas (bottom-centred), trimmed to the union of their pixels."""
+    w, h = max(f.shape[1] for f in frames), max(f.shape[0] for f in frames)
+    out = []
+    for f in frames:
+        c = np.zeros((h, w, 4), np.uint8); ox = (w - f.shape[1]) // 2
+        c[h - f.shape[0]:, ox:ox + f.shape[1]] = f; out.append(c)
+    ys, xs = np.nonzero(np.any([f[..., 3] > 0 for f in out], axis=0))
+    return [f[ys.min():ys.max() + 1, xs.min():xs.max() + 1] for f in out] if len(ys) else out
+
+
+def load_anims(work):
+    """Animations whose frames are already true pixel art, in anim/<name>/take-NN/*.png (rd_anim.py
+    writes them; any tool's 1:1 frames work). No grid recovery: that would wreck 1px detail.
+    Returns {name: {'pick', 'frames', 'takes': {take: frames}, 'info': {take: info}, 'mirror'}}."""
+    root, out = os.path.join(work, 'anim'), {}
+    read = lambda p: pathlib.Path(p).read_text().strip() if os.path.exists(p) else None
+    for d in sorted(glob.glob(os.path.join(root, '*', ''))):
+        name = os.path.basename(os.path.dirname(d))
+        tk = {t: bottom_align([np.array(Image.open(f).convert('RGBA')) for f in sorted(glob.glob(os.path.join(d, t, '*.png')))])
+              for t in sorted(os.listdir(d)) if glob.glob(os.path.join(d, t, '*.png'))}
+        info = {t: json.loads(read(os.path.join(d, t, 'info.json')) or '{}') for t in tk}
+        pick = read(os.path.join(d, 'pick'))
+        pick = pick if pick in tk else (sorted(tk)[-1] if tk else None)
+        out[name] = {'pick': pick, 'frames': tk.get(pick), 'takes': tk, 'info': info, 'mirror': read(os.path.join(d, 'mirror'))}
+    for name, a in out.items():
+        src = out.get(a['mirror']) if a['mirror'] else None
+        if a['mirror'] and not (src and src['frames']):
+            sys.exit(f"anim/{name}: mirror of '{a['mirror']}', which has no picked take")
+        if src:
+            a['frames'] = [f[:, ::-1].copy() for f in src['frames']]
+    return {n: a for n, a in out.items() if a['frames']}
+
+
 def main():
     recipes = json.load(open(sys.argv[1] if len(sys.argv) > 1 else os.path.join(WORK, 'recipes.json')))['recipes']
     recipes = [r for r in recipes if os.path.exists(os.path.join(RAW, r['id'] + '.png'))]
@@ -195,12 +232,21 @@ def main():
         found = list(zip(r['names'], find_sprites(mask, r['grid'])))
         est = {n: pixel_period(rgb[f[0]:f[1], f[2]:f[3]], f[4]) for n, f in found if f}
         sheet_p = float(np.median(list(est.values())))
+        crop = lambda f: (rgb[f[0]:f[1], f[2]:f[3]], f[4])
+        if r.get('pixel'):  # the recipe knows the size: keep it exactly
+            grids = {n: refine_grid(*crop(f), r['pixel'], fixed=True) for n, f in found if f}
+        else:
+            grids = {n: refine_grid(*crop(f), est[n] if abs(est[n] / sheet_p - 1) < 0.4 else sheet_p) for n, f in found if f}
+            if r['kind'] == 'character' and grids:
+                # one character, one pixel size: per-view sizes drift (9.9-12.7px on four same-height
+                # figures), which makes the views different heights. Use their median for every view.
+                shared = float(np.median([g[0] for g in grids.values()]))
+                grids = {n: refine_grid(*crop(f), shared, fixed=True) for n, f in found if f}
         for name, f in found:
             if f is None:
                 continue
             y0, y1, x0, x1, keep = f
-            p0 = r.get('pixel') or (est[name] if abs(est[name] / sheet_p - 1) < 0.4 else sheet_p)
-            p, phx, phy = refine_grid(rgb[y0:y1, x0:x1], keep, p0)
+            p, phx, phy = grids[name]
             # sample at half the model's pixel size: its "pixels" are not on one consistent grid (eye
             # highlights half a pixel wide, one eye half a pixel off the other), and a full-size grid
             # has to drop or misplace those details. Mostly 2x2 blocks, with the odd half-pixel detail kept.
@@ -229,16 +275,39 @@ def main():
 
     # animations pulled out of Grok videos by extract.py
     vids = sorted(glob.glob(os.path.join(WORK, 'video', 'extracted', '*', '01.png')))
-    video_anims = {}
+    more_anims = {}
     for first in vids:
         name = os.path.basename(os.path.dirname(first))
         keys = []
         for f in sorted(glob.glob(os.path.join(os.path.dirname(first), '*.png'))):
             k = f"video-{name}/{os.path.splitext(os.path.basename(f))[0]}"
             sprites[k] = np.array(Image.open(f).convert('RGBA')); keys.append(k)
-        video_anims[f'video-{name}'] = keys
+        more_anims[f'video-{name}'] = keys
         report[keys[0]] = {'detected_pixel': 0, 'size': list(sprites[keys[0]].shape[1::-1]), 'colours': 0,
                            'fixed': 'from Grok video: ' + json.dumps(json.load(open(os.path.join(os.path.dirname(first), 'info.json'))))}
+
+    # animations already on a 1:1 grid (rd_anim.py): the picked take of each goes into the atlas
+    native = load_anims(WORK)
+    clash = set(native) & ({r['id'] for r in recipes} | set(more_anims))
+    if clash:
+        sys.exit(f"anim/ names clash with recipes or videos: {', '.join(sorted(clash))}")
+    takes = {}
+    for name, a in native.items():
+        keys = [f'{name}/{i + 1:02d}' for i in range(len(a['frames']))]
+        sprites.update(zip(keys, a['frames'])); more_anims[name] = keys
+        cols = len(np.unique(np.concatenate([f[f[..., 3] > 0][:, :3] for f in a['frames']]), axis=0))
+        report[keys[0]] = {'detected_pixel': 0, 'size': list(a['frames'][0].shape[1::-1]), 'colours': int(cols), 'fps': 8,
+                           'fixed': f"mirror of {a['mirror']}" if a['mirror'] else f"native frames, {a['pick']} of {len(a['takes'])}"}
+        takes[name] = {'pick': a['pick'], 'mirror': a['mirror'], 'takes': {}}
+        for t, frs in a['takes'].items():
+            d = os.path.join(OUT, 'takes', name, t); os.makedirs(d, exist_ok=True)
+            for f in glob.glob(os.path.join(d, '*.png')):
+                os.remove(f)
+            paths = []
+            for i, f in enumerate(frs):
+                Image.fromarray(f).save(os.path.join(d, f'{i + 1:02d}.png')); paths.append(f'takes/{name}/{t}/{i + 1:02d}.png')
+            inf = a['info'].get(t, {})
+            takes[name]['takes'][t] = {'frames': paths, 'cost_usd': inf.get('cost_usd'), 'seconds': inf.get('seconds'), 'prompt': inf.get('prompt')}
 
     # write sprites + pack a simple shelf atlas
     frames, x, y, row_h, W = {}, 1, 1, 0, 512
@@ -254,22 +323,23 @@ def main():
     for k, (fx, fy, w, h) in frames.items():
         atlas[fy:fy + h, fx:fx + w] = sprites[k]
     Image.fromarray(atlas).save(os.path.join(OUT, 'atlas.png'))
-    anims = {r['id']: [f"{r['id']}/{n}" for n in r['names'] if f"{r['id']}/{n}" in frames] for r in recipes if r['kind'] == 'character'} | video_anims
+    anims = {r['id']: [f"{r['id']}/{n}" for n in r['names'] if f"{r['id']}/{n}" in frames] for r in recipes if r['kind'] == 'character'} | more_anims
     sheet = {'frames': {k: {'frame': {'x': fx, 'y': fy, 'w': w, 'h': h}, 'sourceSize': {'w': w, 'h': h},
                             'spriteSourceSize': {'x': 0, 'y': 0, 'w': w, 'h': h}} for k, (fx, fy, w, h) in frames.items()},
              'animations': anims,
              'meta': {'image': 'atlas.png', 'size': {'w': W, 'h': H}, 'scale': '1', 'app': 'sprite-forge'}}
     json.dump(sheet, open(os.path.join(OUT, 'atlas.json'), 'w'), indent=1)
     json.dump(report, open(os.path.join(OUT, 'report.json'), 'w'), indent=1)
-    write_review(recipes, sheet, report)
+    write_review(recipes, sheet, report, takes)
     for k, v in report.items():
         print(f"{k:38s} pixel≈{v['detected_pixel']:>6}  -> {v['size'][0]}x{v['size'][1]}  {v['colours']} colours  {v.get('fixed', '')}")
 
 
-def write_review(recipes, sheet, report):
+def write_review(recipes, sheet, report, takes=None):
     tpl = open(os.path.join(HERE, 'review.html')).read()
     raw = '\n'.join(f'<figure><img src="raw/{r["id"]}.png" alt="{r["id"]} raw"><figcaption>{r["id"]}</figcaption></figure>' for r in recipes)
-    data = json.dumps({'sheet': sheet, 'report': report, 'recipes': [{k: r[k] for k in ('id', 'kind', 'names', 'prompt') if k in r} | {'note': r.get('note')} for r in recipes]})
+    data = json.dumps({'sheet': sheet, 'report': report, 'takes': takes or {},
+                       'recipes': [{k: r[k] for k in ('id', 'kind', 'names', 'prompt') if k in r} | {'note': r.get('note')} for r in recipes]})
     open(os.path.join(OUT, 'index.html'), 'w').write(tpl.replace('<!--RAW-->', raw).replace('/*DATA*/null', data))
 
 

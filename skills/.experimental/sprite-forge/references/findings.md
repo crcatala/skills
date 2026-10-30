@@ -31,7 +31,10 @@ office worker, a robot and a walking-ham mascot. Numbers below are from that set
 | **Drop pixels under alpha 160.** | Removes the model's halo without eating outlines. |
 | **Every recipe after the first takes a `reference`.** | Only reliable way found to keep pixel size and style consistent across batches. |
 | **Fix model mistakes in the recipe, not by hand** (`fix: mirror`, `max`). | The set stays reproducible from `recipes.json` + `raw/`. |
-| **Walk cycles from video, looped.** | Grok Imagine Video 1.5 with the first and last frame pinned to the same image gives a clean loop. Smoother and more varied than image-model frames. Since beaten on price per try by Retro Diffusion (see the comparison below). |
+| **Walk cycles from Retro Diffusion, by takes** (`rd_anim.py`). | $0.14 a try for true pixel art from our own sprite, nothing to clean up, and the only service that added hair, tail and blink motion unasked. Quality varies by take on every service, so regenerate and pick rather than fix (see the comparison below). |
+| **Grok video as the alternative, looped.** | Grok Imagine Video 1.5 with the first and last frame pinned to the same image gives a clean loop, smoother and more varied than image-model frames, but costs $0.34 a clip and needs the clean-up below. For no Retro Diffusion key, or sprites over its 256px. |
+| **Already-1:1 frames skip grid recovery** (`anim/`). | Grid recovery reads true 1px detail as 4-7px blocks and shrinks a sprite to a smudge. |
+| **A character's views share one pixel size** (their median), or exactly the recipe's `pixel`. | Detected per view, the sizes drifted 9.9-12.7px on four same-height figures, so views and walk frames came out at different heights (65-75px on one walk). |
 | **Animate only from a finished sprite.** | Round 2 clips came from sprites with broken eyes and kept them in every frame; round 3 clips from fixed sprites kept the face. |
 | **Video frames: snap to the source sprite's colours, lock the head.** | Snapping removes the video's colour drift (no flicker). The head lock pastes the original head onto each frame so the face cannot drift; it changed little on good clips but costs nothing. |
 | **Take 8 evenly spaced frames from one cycle in the middle of the clip.** | The pinned start and end ease in and out; the cycle period is found from frame similarity. |
@@ -65,11 +68,10 @@ office worker, a robot and a walking-ham mascot. Numbers below are from that set
 
 - Paper-doll characters (one hand-made or bought base body with generated accessories) may suit a large
   generated cast better; video suits a few named characters and big moments.
-- A `native` input mode for art that is already 1:1, and an optional Retro Diffusion walk backend (see
-  below).
-- forge.py picks a pixel size per view, so one character's views can come out at different heights
-  (82px facing the camera, 67px side on, from a sheet whose four figures are the same height). A
-  recipe's `pixel` only seeds the search, which moves away from it; pinning the size per recipe fixed it.
+- Characters made in different sheets still differ in scale by their sheets' pixel size (the new cast
+  came out 73px tall to the worker's 66px); set `pixel` to the reference's size to match them.
+- Still frames from the services (PixelLab rotations, Retro Diffusion props) have no import path yet,
+  only animations through `anim/`.
 
 ## Compared with PixelLab, Retro Diffusion and Sprite Fusion
 

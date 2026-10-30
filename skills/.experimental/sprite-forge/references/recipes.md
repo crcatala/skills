@@ -28,7 +28,7 @@
 | `reference` | Another recipe whose raw sheet is passed as a reference image. Use on every recipe but the first. |
 | `max` | `[w, h]` in px: shrink exactly 2× while the sprite is over 1.3× this. For a model that drew something far too big. |
 | `fix` | Per-cell repairs, e.g. `{"walk-down-3": {"mirror": "walk-down-1"}}`. |
-| `pixel` | Force the model's pixel size in image pixels when detection gets it wrong. |
+| `pixel` | The model's pixel size in image pixels, used exactly. Without it, each sprite's is detected, and a `character`'s views share their median so they come out the same height. To put a new character on another's scale, set this to that character's detected size (`out/report.json`). |
 | `note`, `experiment` | Free text shown on the review page. |
 
 Characters: ask for "shown 4 times in a single row as a top-down RPG turnaround: facing the camera,

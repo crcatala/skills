@@ -1,7 +1,7 @@
 ---
 name: sprite-forge
-description: "Make game-ready pixel-art sprites (props, decorations, characters with turnarounds and looping walk cycles) from image- and video-model output: recovers the model's pixel grid, cleans colours, packs a PixiJS atlas and builds a review page. Use when asked to generate, add or redo pixel-art sprites or game art."
-compatibility: "Requires uv (or python3 with numpy and Pillow) and an image-generation skill or tool in the session that makes transparent PNGs from a prompt plus a reference image (paid API calls). Animation also needs ffmpeg, network access and XAI_API_KEY (Grok Imagine Video, paid)."
+description: "Make game-ready pixel-art sprites (props, decorations, characters with turnarounds and looping walk cycles) from image-model output, animated with Retro Diffusion or Grok video: recovers the model's pixel grid, cleans colours, packs a PixiJS atlas and builds a review page. Use when asked to generate, add or redo pixel-art sprites, walk cycles or game art."
+compatibility: "Requires uv (or python3 with numpy and Pillow) and an image-generation skill or tool in the session that makes transparent PNGs from a prompt plus a reference image (paid API calls). Animation needs network access and RETRO_DIFFUSION_API_KEY (Retro Diffusion, paid), or ffmpeg and XAI_API_KEY (Grok Imagine Video, paid)."
 ---
 
 # sprite-forge
@@ -25,7 +25,8 @@ uv --version || python3 -c "import numpy, PIL"
   particular one exists. Found: name it. Found without transparency or reference input: say so and stop
   (the halo removal needs alpha; consistent scale needs references). None: say an image-generation skill
   or tool is a prerequisite and stop.
-- Animation only: `ffmpeg -version` and `XAI_API_KEY` set. Missing: skip animation and say why.
+- Animation only: `RETRO_DIFFUSION_API_KEY` set (Retro Diffusion), or `ffmpeg -version` and
+  `XAI_API_KEY` set (Grok video). Neither: skip animation and say why.
 
 ## A sprite set
 
@@ -47,10 +48,35 @@ output), `video/` and `out/` next to it; run them from that folder. Recipe field
 4. Show the user the review page (publish it if a page-sharing tool is available). Check faces and eyes,
    outlines, sizes next to the reference character, and that animations hold steady.
 
-## Animate (optional, about $0.34 per 4-second clip)
+## Animate (optional)
 
-Loops come from Grok Imagine Video 1.5. Animate only a finished sprite whose face is right: the video
-inherits whatever it is given.
+Animate only a finished sprite whose face is right: every method copies whatever it is given. Side
+views come out cleanest; mirror right for left instead of paying for both.
+
+### Retro Diffusion (default, $0.14 a take)
+
+`rd_anim.py` sends the sprite as the start frame of a Retro Diffusion animation and gets back true
+pixel art: nothing to clean up. Takes vary in quality (so did every service tried), so **regenerate
+rather than fix**: each run adds a take, the newest is picked, and the review page plays them all.
+
+```bash
+uv run {baseDir}/scripts/rd_anim.py out/sprites/<char>/right.png <char>-walk-right "steady side-view walk cycle in place, facing right, legs stepping and arms swinging gently"
+uv run {baseDir}/scripts/forge.py                                    # review every take
+uv run {baseDir}/scripts/rd_anim.py --pick <char>-walk-right 2       # keep take 2
+uv run {baseDir}/scripts/rd_anim.py --mirror <char>-walk-left <char>-walk-right
+uv run {baseDir}/scripts/forge.py
+```
+
+Toward the camera: "calm walk toward the camera in place, gentle arm swings, legs alternating".
+`--action` also does idle, jump, crouch, attack, destroy, custom_action and subtle_motion (the last
+two $0.25); `--frames` 4-16 (8 loops best); `--dry-run` prices a call for free. Sprites up to 256px.
+Takes live in `anim/<name>/take-NN/`; forge.py packs the picked one, unchanged, as animation `<name>`.
+Frames that are already 1:1 from any other tool can go in `anim/` the same way.
+
+### Grok video (alternative, about $0.34 a clip)
+
+Use it when there is no Retro Diffusion key or the sprite is over 256px. Loops come from Grok Imagine
+Video 1.5; the clip is cleaned back onto the sprite's grid and colours.
 
 ```bash
 uv run {baseDir}/scripts/video.py out/sprites/<char>/right.png <char>-walk-right "<prompt>"
@@ -63,12 +89,13 @@ right, walks in place: a steady looping side-view walk cycle, legs stepping and 
 character stays in the centre and does not travel. Locked-off camera. The flat solid green background
 stays exactly the same and empty. Keep the crisp blocky pixel-art look, the same colours and outline,
 and keep the face exactly as it is." `--lock` is the head's share of the sprite's height; it pastes the
-original head onto every frame. Side views come out cleanest; mirror right for left instead of paying
-for both.
+original head onto every frame.
 
 ## Don't
 
 - Resize sprites to fit a tile size. Choose the game's scale to fit them (characters come out about
   66px tall: 32px tiles, or 16px art drawn at 2×).
 - Snap different sheets to one shared palette.
+- Run art that is already 1:1 (Retro Diffusion, PixelLab, Sprite Fusion output) through grid recovery:
+  it reads 1px detail as blocks and shrinks the sprite to a smudge. Put its frames in `anim/` instead.
 - Hand-edit `out/`. Fix the recipe (`fix`, `max`) or regenerate, so the set can always be rebuilt.

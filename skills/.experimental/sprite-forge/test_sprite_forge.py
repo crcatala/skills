@@ -1,10 +1,13 @@
-"""Synthetic check that forge recovers a sprite from fake, blurry "pixel art" (python -m unittest)."""
-import os, sys, unittest
+"""Synthetic checks: forge recovers a sprite from fake, blurry "pixel art", packs native animation
+takes, and rd_anim prepares and splits frames (python -m unittest; no network)."""
+import os, sys, tempfile, unittest
+from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFilter
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts'))
 import forge  # noqa: E402
+import rd_anim  # noqa: E402
 
 # 10x12 sprite with an outline and two 1-pixel eyes, like a small character's face
 SPRITE = [
@@ -62,6 +65,72 @@ class ForgeTest(unittest.TestCase):
         p, phx, phy = forge.refine_grid(sub, keep, forge.pixel_period(sub, keep))
         out = forge.tidy(forge.sample_native(sub, keep, p / 2, phx, phy))
         self.assertLessEqual(abs(out.shape[0] - 2 * truth.shape[0]), 2)
+
+    def test_fixed_grid_keeps_size(self):
+        sheet, _ = fake_model_sheet()
+        rgb, mask = sheet[..., :3].astype(np.int32), sheet[..., 3] >= forge.ALPHA_CUT
+        y0, y1, x0, x1, keep = forge.find_sprites(mask, [1, 1])[0]
+        p, _, _ = forge.refine_grid(rgb[y0:y1, x0:x1], keep, 9.0, fixed=True)
+        self.assertEqual(p, 9.0)
+
+
+def frame(w, h, foot=0, colour=(200, 60, 70)):
+    """A w x h block on a 20x24 transparent canvas, its bottom `foot` px above the canvas bottom."""
+    a = np.zeros((24, 20, 4), np.uint8)
+    a[24 - foot - h:24 - foot, 10 - w // 2:10 - w // 2 + w] = (*colour, 255)
+    a[24 - foot - h, 10 - w // 2] = (0, 0, 0, 255)  # a dark top-left corner, so a mirror is detectable
+    return Image.fromarray(a)
+
+
+class AnimTest(unittest.TestCase):
+    def write_take(self, root, name, take, frames):
+        d = os.path.join(root, 'anim', name, take); os.makedirs(d)
+        for i, f in enumerate(frames):
+            f.save(os.path.join(d, f'{i + 1:02d}.png'))
+
+    def test_pick_trim_and_mirror(self):
+        with tempfile.TemporaryDirectory() as root:
+            self.write_take(root, 'walk', 'take-01', [frame(4, 6), frame(4, 8)])
+            self.write_take(root, 'walk', 'take-02', [frame(6, 10, foot=1), frame(8, 10, foot=1), frame(6, 9, foot=1)])
+            Path(root, 'anim', 'walk', 'pick').write_text('take-01\n')
+            os.makedirs(os.path.join(root, 'anim', 'walk-left'))
+            Path(root, 'anim', 'walk-left', 'mirror').write_text('walk\n')
+            a = forge.load_anims(root)
+            self.assertEqual(a['walk']['pick'], 'take-01')
+            self.assertEqual(len(a['walk']['frames']), 2)
+            self.assertEqual([f.shape[:2] for f in a['walk']['frames']], [(8, 4), (8, 4)])  # trimmed to the union
+            self.assertEqual(len(a['walk']['takes']), 2)
+            np.testing.assert_array_equal(a['walk-left']['frames'][0], a['walk']['frames'][0][:, ::-1])
+            self.assertFalse(np.array_equal(a['walk-left']['frames'][0], a['walk']['frames'][0]))
+            os.remove(os.path.join(root, 'anim', 'walk', 'pick'))
+            self.assertEqual(forge.load_anims(root)['walk']['pick'], 'take-02')  # no pick: the newest take
+
+    def test_mirror_of_nothing_fails(self):
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, 'anim', 'left'))
+            Path(root, 'anim', 'left', 'mirror').write_text('right\n')
+            with self.assertRaises(SystemExit):
+                forge.load_anims(root)
+
+    def test_start_canvas(self):
+        c = rd_anim.start_canvas(Image.fromarray(np.pad(np.array(frame(10, 20)), ((5, 5), (5, 5), (0, 0)))))
+        self.assertEqual(c.size, (32, 32))  # the API's minimum
+        x0, y0, x1, y1 = c.getbbox()
+        self.assertEqual((x1 - x0, y1 - y0), (10, 20))
+        self.assertEqual(y1, 32 - 2)  # feet just above the bottom
+        big = Image.fromarray(np.full((67, 35, 4), 255, np.uint8))
+        self.assertEqual(rd_anim.start_canvas(big).size, (72, 72))
+        with self.assertRaises(SystemExit):
+            rd_anim.start_canvas(Image.fromarray(np.full((260, 40, 4), 255, np.uint8)))
+
+    def test_split_sheet(self):
+        sheet = Image.new('RGBA', (4 * 32, 2 * 32))
+        for i in range(8):
+            sheet.paste(Image.new('RGBA', (5, 5), (i * 30, 0, 0, 255)), ((i % 4) * 32 + 3, (i // 4) * 32 + 3))
+        cells = rd_anim.split_sheet(sheet, 32, 8)
+        self.assertEqual([c.getpixel((4, 4))[0] for c in cells], [i * 30 for i in range(8)])  # row by row
+        with self.assertRaises(SystemExit):
+            rd_anim.split_sheet(sheet, 32, 10)
 
 
 if __name__ == '__main__':
