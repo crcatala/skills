@@ -32,7 +32,7 @@ office worker, a robot and a walking-ham mascot. Numbers below are from that set
 | **Every recipe after the first takes a `reference`.** | Only reliable way found to keep pixel size and style consistent across batches. |
 | **Fix model mistakes in the recipe, not by hand** (`fix: mirror`, `max`). | The set stays reproducible from `recipes.json` + `raw/`. |
 | **Walk cycles from Retro Diffusion, by takes** (`rd_anim.py`). | $0.14 a try for true pixel art from our own sprite, nothing to clean up, and the only service that added hair, tail and blink motion unasked. Quality varies by take on every service, so regenerate and pick rather than fix (see the comparison below). |
-| **Grok video as the alternative, looped.** | Grok Imagine Video 1.5 with the first and last frame pinned to the same image gives a clean loop, smoother and more varied than image-model frames, but costs $0.34 a clip and needs the clean-up below. For no Retro Diffusion key, or sprites over its 256px. |
+| **Grok video as the alternative, looped.** | Grok Imagine Video 1.5 with the first and last frame pinned to the same image gives a clean loop, smoother and more varied than image-model frames, but costs $0.34 a clip and needs the clean-up below. For no Retro Diffusion key, or sprites over its 256px. Cheaper video models were tried and none was better in every direction (see the video bake-off below). |
 | **Already-1:1 frames skip grid recovery** (`anim/`). | Grid recovery reads true 1px detail as 4-7px blocks and shrinks a sprite to a smudge. |
 | **A character's views share one pixel size** (their median), or exactly the recipe's `pixel`. | Detected per view, the sizes drifted 9.9-12.7px on four same-height figures, so views and walk frames came out at different heights (65-75px on one walk). |
 | **Animate only from a finished sprite.** | Round 2 clips came from sprites with broken eyes and kept them in every frame; round 3 clips from fixed sprites kept the face. |
@@ -54,6 +54,7 @@ office worker, a robot and a walking-ham mascot. Numbers below are from that set
 |---|---|
 | Image sheet, 1k, medium quality | about $0.01 |
 | Video clip, 4 s, 480p, `grok-imagine-video-1.5` | $0.34 |
+| Video clip, 4 s, through OpenRouter: Veo 3.1 Lite 720p / Seedance 2.0 Mini 480p / Wan 3.0 480p | $0.12 / $0.14 / $0.21 |
 | All three rounds (8 sheets, 6 clips) | about $2.15 |
 
 ## Tried and dropped
@@ -118,3 +119,29 @@ credits.
   450-3,000) or top-up ($5 for 150). All three allow commercial use and forbid training other models
   on outputs; Retro Diffusion may train on yours, and Sprite Fusion may show work made with free
   credits in its public gallery.
+
+## Video bake-off: replacements for Grok
+
+30 October 2026, on the courier walking right and toward the camera: two takes per model and
+direction through OpenRouter's video API (`POST /api/v1/videos`), the same green canvas, prompt and
+pinned first and last frame as `video.py`, cleaned up with `extract.py --lock 0.45`. Three Grok takes
+and four Retro Diffusion takes for comparison. Cost: $3.06.
+
+- **Kept Grok.** No cheaper model was better in both directions, and switching needs a second
+  provider path for a fallback that only runs without Retro Diffusion.
+- **Veo 3.1 Lite** ($0.12, about a minute) was the most faithful side-on, with the cleanest frames, but
+  both front walks ignored "calm": arms flung out, stomping. Worth retrying with a stronger prompt
+  (small steps, arms close to the body) before reconsidering.
+- **Wan 3.0** ($0.21) made the best calm front walk and the worst take: one turned the character
+  three-quarters and walked diagonally, which the head lock can't repair. Softer frames side-on.
+- **Seedance 2.0 Mini** ($0.14) redrew the side view (a satchel became a backpack) and barely walked
+  toward the camera; it also darkens the frame and returns 864×496, not quite 16:9.
+- **Grok** toward the camera: one near-standing shuffle, one fair walk. **Retro Diffusion**: all four
+  takes on model.
+- **Kling 3.0 std** was not run: on OpenRouter its only provider was outside the account's allowed
+  providers.
+- Practicalities: every clip looped, and `extract.py` cleaned up all 15 unchanged, whatever the
+  resolution. Toward-camera walks vary far more between models and takes than side walks.
+  OpenRouter video can't run under Zero Data Retention (providers keep the clip for download), so an
+  account that enforces it needs a separate key or workspace. On OpenRouter, Grok accepts only a first
+  frame, so it can't loop there; use xAI directly.
