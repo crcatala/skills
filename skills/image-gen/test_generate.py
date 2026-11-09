@@ -82,6 +82,12 @@ class KeyFallbackTests(unittest.TestCase):
             provider, _, _ = prepare(*argv, env=self.XAI_ONLY)
             self.assertEqual(provider.name, "openai", argv)
 
+    def test_no_fallback_for_svg_or_gif_output_paths(self):
+        for output in ("logo.svg", "loop.GIF"):
+            provider, _, body = prepare("--output", output, env=self.XAI_ONLY)
+            self.assertEqual(provider.name, "openai", output)
+            self.assertIn(body["output_format"], ("svg", "gif"))
+
     def test_no_fallback_when_provider_or_model_is_explicit(self):
         self.assertEqual(prepare("--provider", "openai", env=self.XAI_ONLY)[0].name, "openai")
         self.assertEqual(prepare("--model", "gpt-image-2.5-sunburst", env=self.XAI_ONLY)[0].name, "openai")
@@ -152,6 +158,12 @@ class OptionValidationTests(unittest.TestCase):
                      ["--complexity", "low"], ["--frames", "4"], ["--svg-model", "x"]):
             with self.assertRaisesRegex(generate.UsageError, "not supported by xAI"):
                 prepare("--provider", "xai", *argv)
+
+    def test_xai_rejects_svg_or_gif_output_paths(self):
+        for output in ("logo.svg", "loop.gif"):
+            with self.assertRaisesRegex(generate.UsageError, "xAI cannot produce"):
+                prepare("--provider", "xai", "--output", output)
+        self.assertEqual(prepare("--provider", "xai", "--output", "hero.webp")[0].name, "xai")
 
     def test_xai_rejects_unsupported_ratio(self):
         with self.assertRaisesRegex(generate.UsageError, "does not support aspect ratio 21:9"):

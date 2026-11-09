@@ -280,6 +280,10 @@ class XAIProvider:
             raise UsageError(
                 f"{', '.join(unsupported)} {'is' if len(unsupported) == 1 else 'are'} not supported "
                 "by xAI; use --provider openai (or --aspect-ratio/--resolution instead of --size).")
+        implied = OUTPUT_EXTENSION_FORMATS.get(Path(args.output).suffix.lower()) if args.output else None
+        if implied in ("svg", "gif"):
+            raise UsageError(f"xAI cannot produce {implied.upper()} output (--output {args.output}); "
+                             "use --provider openai with a GPT Image 2.6 model.")
         if args.aspect_ratio not in (None, "auto", *COMMON_ASPECT_RATIOS):
             raise UsageError(
                 f"xAI does not support aspect ratio {args.aspect_ratio}; use one of: "
