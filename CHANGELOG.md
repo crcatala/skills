@@ -6,6 +6,12 @@ separately unless they carry `metadata.version` for their own breaking changes.
 
 ## [Unreleased]
 
+### Changed
+- `image-gen`: the default OpenAI model is now `gpt-image-2.6-flare`. New options for GPT Image 2.6:
+  `--complexity`, SVG output (`--format svg`, `--svg-model`), animated GIF output (`--format gif`,
+  `--frames`, `--frame-duration`), and markup-guided edits (`--markup`, also on 2.5). Documents
+  that 2.6 uses 3–4x more output tokens than 2.5 at low and medium quality.
+
 ### Added
 - `anatomy`: user-invoked skill that builds interactive isometric SVG figures
   explaining an idea as a physical machine, derived from wheresryan22/anatomy at

@@ -22,7 +22,11 @@ from pathlib import Path
 
 DEFAULT_OUTPUT_DIR = Path("/tmp/image-gen")
 TRANSPARENT_FORMATS = {"png", "webp"}
-OUTPUT_EXTENSION_FORMATS = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".webp": "webp"}
+OUTPUT_EXTENSION_FORMATS = {
+    ".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".webp": "webp", ".gif": "gif", ".svg": "svg",
+}
+# Default model that writes SVG output from the reference image (OpenAI svg.model).
+DEFAULT_SVG_MODEL = "gpt-6.1-terra"
 
 # Request fields that dedicated options control; --extra may not override them, or it
 # could bypass the per-provider validation (for example sending background to xAI).
@@ -31,7 +35,9 @@ RESERVED_FIELDS = {
     "size": "--size, --aspect-ratio, or --resolution", "aspect_ratio": "--aspect-ratio",
     "resolution": "--resolution", "quality": "--quality", "background": "--transparent",
     "output_format": "--format", "output_compression": "--compression",
-    "image": "--image", "images": "--image", "mask": "--mask",
+    "image": "--image", "images": "--image", "mask": "--mask", "markup": "--markup",
+    "complexity": "--complexity", "frame_count": "--frames", "frame_duration_ms": "--frame-duration",
+    "svg": "--svg-model",
     "response_format": "the wrapper (it always requests base64)",
 }
 
@@ -87,9 +93,12 @@ class OpenAIProvider:
     env_key = "OPENAI_API_KEY"
     base_url_env = "OPENAI_BASE_URL"
     default_base_url = "https://api.openai.com/v1"
-    default_model = "gpt-image-2.5-flare"
+    default_model = "gpt-image-2.6-flare"
     # Validation follows the GPT Image 2.x rules; DALL-E takes a different request shape.
     model_prefixes = ("gpt-image", "chatgpt-image")
+    # Complexity, SVG and GIF output are GPT Image 2.6 features; markup edits also work on 2.5.
+    v26_prefixes = ("gpt-image-2.6",)
+    markup_prefixes = ("gpt-image-2.5", "gpt-image-2.6")
     qualities = ["low", "medium", "high", "xhigh", "max", "auto"]
     max_images = 16
     max_n = 10
@@ -132,7 +141,8 @@ class OpenAIProvider:
             raise UsageError(f"--format {args.format} conflicts with the --output extension {suffix}.")
         return args.format or from_output or "png"
 
-    def validate_size(self, size):
+    def validate_size(self, size, pixel_limits=True):
+        """Check a WIDTHxHEIGHT size. GIF frames have their own, smaller budget, which the API checks."""
         if size == "auto":
             return
         try:
@@ -143,6 +153,8 @@ class OpenAIProvider:
             raise UsageError(f"Invalid size '{size}'; both edges must be positive.")
         if width % 16 or height % 16:
             raise UsageError(f"Size {size} is invalid: both edges must be multiples of 16.")
+        if not pixel_limits:
+            return
         if max(width, height) > self.max_edge:
             raise UsageError(f"Size {size} is invalid: edges must be at most {self.max_edge}px.")
         if max(width, height) / min(width, height) > 3:
@@ -152,18 +164,53 @@ class OpenAIProvider:
                 f"Size {size} is invalid: total pixels must be between "
                 f"{self.min_pixels:,} and {self.max_pixels:,}.")
 
+    def check_v26_features(self, args, output_format):
+        """Reject GPT Image 2.6 options on older models and options that do not fit the output format."""
+        is_v26 = args.model.startswith(self.v26_prefixes)
+        for flag, used in (("--complexity", args.complexity), ("--format svg", output_format == "svg"),
+                           ("--format gif", output_format == "gif")):
+            if used and not is_v26:
+                raise UsageError(f"{flag} requires a GPT Image 2.6 model (gpt-image-2.6-flare or "
+                                 f"gpt-image-2.6-sunburst), not {args.model}.")
+        if args.markup and not args.model.startswith(self.markup_prefixes):
+            raise UsageError(f"--markup requires a GPT Image 2.5 or 2.6 model, not {args.model}.")
+        if output_format != "gif" and (args.frames is not None or args.frame_duration is not None):
+            raise UsageError("--frames and --frame-duration apply only to GIF output (--format gif).")
+        if output_format != "svg" and args.svg_model is not None:
+            raise UsageError("--svg-model applies only to SVG output (--format svg).")
+        if output_format == "svg":
+            if args.image:
+                raise UsageError("SVG output works only for new images; the edit endpoint "
+                                 "(--image) cannot return SVG.")
+            if args.n != 1:
+                raise UsageError("SVG output requires --n 1.")
+            if args.size or args.resolution or args.aspect_ratio not in (None, "auto"):
+                raise UsageError("SVG output does not take --size, --aspect-ratio, or --resolution; "
+                                 "describe the shape in the prompt.")
+        if output_format == "gif" and args.mask:
+            raise UsageError("GIF output does not support --mask.")
+        if args.frames is not None and not 2 <= args.frames <= 16:
+            raise UsageError("--frames must be between 2 and 16.")
+        if args.frame_duration is not None and not 20 <= args.frame_duration <= 2000:
+            raise UsageError("--frame-duration must be between 20 and 2000 milliseconds.")
+
     def build(self, args):
         output_format = self.output_format(args)
         if args.transparent and output_format not in TRANSPARENT_FORMATS:
             raise UsageError("Transparent backgrounds require PNG or WebP output "
                              "(--format png|webp, or an --output path ending in .png or .webp).")
-        if args.compression is not None and output_format == "png":
+        if args.compression is not None and output_format not in ("jpeg", "webp"):
             raise UsageError("--compression applies only to jpeg or webp output.")
         if args.mask and not args.image:
             raise UsageError("--mask requires --image; it applies to the first input image.")
+        if args.markup and not args.image:
+            raise UsageError("--markup requires --image; it annotates the first input image.")
+        if args.markup and args.mask:
+            raise UsageError("--markup cannot be combined with --mask.")
+        self.check_v26_features(args, output_format)
 
         size = self.size_for(args)
-        self.validate_size(size)
+        self.validate_size(size, pixel_limits=output_format != "gif")
         body = {
             "model": args.model,
             "prompt": args.prompt,
@@ -176,6 +223,17 @@ class OpenAIProvider:
             body["background"] = "transparent"
         if args.compression is not None:
             body["output_compression"] = args.compression
+        if args.complexity:
+            body["complexity"] = args.complexity
+        if args.frames is not None:
+            body["frame_count"] = args.frames
+        if args.frame_duration is not None:
+            body["frame_duration_ms"] = args.frame_duration
+        if output_format == "svg":
+            body.pop("size")  # The API sizes the reference image for SVG itself.
+            svg_model = args.svg_model or DEFAULT_SVG_MODEL
+            if svg_model != "none":
+                body["svg"] = {"model": svg_model}
 
         if not args.image:
             return "images/generations", body
@@ -185,6 +243,8 @@ class OpenAIProvider:
         ]
         if args.mask:
             body["mask"] = {"image_url": data_url(args.mask, {"image/png"}, self.max_data_url_chars)}
+        if args.markup:
+            body["markup"] = {"image_url": data_url(args.markup, {"image/png"}, self.max_data_url_chars)}
         return "images/edits", body
 
 
@@ -208,16 +268,18 @@ class XAIProvider:
             raise UsageError(
                 "xAI Grok Imagine cannot produce transparent backgrounds: it always returns an "
                 "opaque image, and asking for transparency in the prompt only paints a fake "
-                "checkerboard into the pixels. Use --provider openai (gpt-image-2.5-flare) for "
+                "checkerboard into the pixels. Use --provider openai (gpt-image-2.6-flare) for "
                 "transparent output, or drop --transparent.")
         unsupported = [flag for flag, value in (
             ("--size", args.size), ("--format", args.format),
-            ("--compression", args.compression), ("--mask", args.mask),
+            ("--compression", args.compression), ("--mask", args.mask), ("--markup", args.markup),
+            ("--complexity", args.complexity), ("--frames", args.frames),
+            ("--frame-duration", args.frame_duration), ("--svg-model", args.svg_model),
         ) if value is not None]
         if unsupported:
             raise UsageError(
                 f"{', '.join(unsupported)} {'is' if len(unsupported) == 1 else 'are'} not supported "
-                "by xAI; use --aspect-ratio/--resolution, or --provider openai.")
+                "by xAI; use --provider openai (or --aspect-ratio/--resolution instead of --size).")
         if args.aspect_ratio not in (None, "auto", *COMMON_ASPECT_RATIOS):
             raise UsageError(
                 f"xAI does not support aspect ratio {args.aspect_ratio}; use one of: "
@@ -279,6 +341,11 @@ def image_extension(content):
         return ".jpg"
     if content.startswith(b"RIFF") and content[8:12] == b"WEBP":
         return ".webp"
+    if content.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    head = content[:512].lstrip()
+    if head.startswith(b"<svg") or (head.startswith(b"<?xml") and b"<svg" in head):
+        return ".svg"
     raise RuntimeError("The API returned an image in an unrecognized format.")
 
 
@@ -386,7 +453,7 @@ def build_parser():
     parser.add_argument("prompt", nargs="+", help="Image-generation or image-editing instruction")
     parser.add_argument("--provider", choices=sorted(PROVIDERS),
                         help="openai (default) or xai; inferred from --model when omitted")
-    parser.add_argument("--model", help="Model ID (default: gpt-image-2.5-flare for openai, "
+    parser.add_argument("--model", help="Model ID (default: gpt-image-2.6-flare for openai, "
                                         "grok-imagine-image-2.0 for xai)")
     parser.add_argument("--n", type=int, default=1, help="Number of images (default: 1, max: 10)")
     parser.add_argument("--aspect-ratio", help="W:H ratio such as 1:1, 16:9, 9:16, or auto")
@@ -396,12 +463,22 @@ def build_parser():
                                           "xai: low, medium (default: medium)")
     parser.add_argument("--transparent", action="store_true",
                         help="Transparent background (openai only; png or webp output)")
-    parser.add_argument("--format", choices=["png", "jpeg", "webp"], help="Output format (openai only; default: png)")
+    parser.add_argument("--format", choices=["png", "jpeg", "webp", "gif", "svg"],
+                        help="Output format (openai only; default: png). gif and svg need GPT Image 2.6")
     parser.add_argument("--compression", type=int, help="0-100 for jpeg/webp output (openai only)")
+    parser.add_argument("--complexity", choices=["low", "medium", "high"],
+                        help="Planning effort before rendering (GPT Image 2.6 only; API default: high)")
+    parser.add_argument("--frames", type=int, help="GIF frame count, 2-16 (API default: 9)")
+    parser.add_argument("--frame-duration", type=int, metavar="MS",
+                        help="Milliseconds per GIF frame, 20-2000 (API default: 200)")
+    parser.add_argument("--svg-model", help=f"Model that writes SVG output (default: {DEFAULT_SVG_MODEL}; "
+                                            "'none' omits the field)")
     parser.add_argument("--image", action="append",
                         help="Input image path or URL to edit or use as a reference; repeatable "
                              "(openai: up to 16, xai: up to 3)")
     parser.add_argument("--mask", help="PNG mask for the first --image; transparent pixels mark the edit area (openai only)")
+    parser.add_argument("--markup", help="Transparent PNG of circles or sketches over the first --image, the "
+                                         "same size, marking where to edit (GPT Image 2.5/2.6 only)")
     parser.add_argument("--extra", action="append", default=[], metavar="KEY=VALUE",
                         help="Extra provider request field; VALUE is parsed as JSON when possible. Repeatable.")
     parser.add_argument("--output", "-o", help="Output file (one image) or directory/prefix (multiple)")
