@@ -31,8 +31,9 @@ class ProviderResolutionTests(unittest.TestCase):
         provider, endpoint, body = prepare()
         self.assertEqual(provider.name, "openai")
         self.assertEqual(endpoint, "images/generations")
-        self.assertEqual(body["model"], "gpt-image-2.5-flare")
+        self.assertEqual(body["model"], "gpt-image-2.6-flare")
         self.assertEqual(body["quality"], "medium")
+        self.assertNotIn("complexity", body)
 
     def test_transparent_without_provider_uses_openai(self):
         provider, _, body = prepare("--transparent")
@@ -80,6 +81,12 @@ class KeyFallbackTests(unittest.TestCase):
         for argv in (["--transparent"], ["--size", "1536x864"], ["--quality", "max"], ["--format", "webp"]):
             provider, _, _ = prepare(*argv, env=self.XAI_ONLY)
             self.assertEqual(provider.name, "openai", argv)
+
+    def test_no_fallback_for_svg_or_gif_output_paths(self):
+        for output in ("logo.svg", "loop.GIF"):
+            provider, _, body = prepare("--output", output, env=self.XAI_ONLY)
+            self.assertEqual(provider.name, "openai", output)
+            self.assertIn(body["output_format"], ("svg", "gif"))
 
     def test_no_fallback_when_provider_or_model_is_explicit(self):
         self.assertEqual(prepare("--provider", "openai", env=self.XAI_ONLY)[0].name, "openai")
@@ -147,9 +154,16 @@ class OpenAISizeTests(unittest.TestCase):
 
 class OptionValidationTests(unittest.TestCase):
     def test_xai_rejects_openai_only_options(self):
-        for argv in (["--size", "1024x1024"], ["--format", "png"], ["--compression", "80"]):
+        for argv in (["--size", "1024x1024"], ["--format", "png"], ["--compression", "80"],
+                     ["--complexity", "low"], ["--frames", "4"], ["--svg-model", "x"]):
             with self.assertRaisesRegex(generate.UsageError, "not supported by xAI"):
                 prepare("--provider", "xai", *argv)
+
+    def test_xai_rejects_svg_or_gif_output_paths(self):
+        for output in ("logo.svg", "loop.gif"):
+            with self.assertRaisesRegex(generate.UsageError, "xAI cannot produce"):
+                prepare("--provider", "xai", "--output", output)
+        self.assertEqual(prepare("--provider", "xai", "--output", "hero.webp")[0].name, "xai")
 
     def test_xai_rejects_unsupported_ratio(self):
         with self.assertRaisesRegex(generate.UsageError, "does not support aspect ratio 21:9"):
@@ -245,6 +259,85 @@ class OutputFormatTests(unittest.TestCase):
             prepare("--format", "png", "--output", "hero.webp")
 
 
+class GPTImage26Tests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.source = Path(self.directory.name) / "source.png"
+        self.source.write_bytes(PNG_BYTES)
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def test_complexity_is_sent_for_26_only(self):
+        self.assertEqual(prepare("--complexity", "low")[2]["complexity"], "low")
+        self.assertEqual(prepare("--model", "gpt-image-2.6-sunburst", "--complexity", "high")[2]["complexity"], "high")
+        with self.assertRaisesRegex(generate.UsageError, "requires a GPT Image 2.6 model"):
+            prepare("--model", "gpt-image-2.5-flare", "--complexity", "low")
+
+    def test_svg_output(self):
+        _, endpoint, body = prepare("--output", "logo.svg")
+        self.assertEqual(endpoint, "images/generations")
+        self.assertEqual(body["output_format"], "svg")
+        self.assertEqual(body["svg"], {"model": generate.DEFAULT_SVG_MODEL})
+        self.assertNotIn("size", body)
+        self.assertEqual(prepare("--format", "svg", "--svg-model", "gpt-6-astra")[2]["svg"], {"model": "gpt-6-astra"})
+        self.assertNotIn("svg", prepare("--format", "svg", "--svg-model", "none")[2])
+
+    def test_svg_rejects_unsupported_options(self):
+        for argv, message in ((["--n", "2"], "--n 1"), (["--image", str(self.source)], "edit endpoint"),
+                              (["--size", "1024x1024"], "does not take --size"),
+                              (["--aspect-ratio", "16:9"], "does not take --size"),
+                              (["--transparent"], "PNG or WebP"), (["--compression", "50"], "jpeg or webp"),
+                              (["--model", "gpt-image-2.5-sunburst"], "2.6 model")):
+            with self.assertRaisesRegex(generate.UsageError, message):
+                prepare("--format", "svg", *argv)
+        with self.assertRaisesRegex(generate.UsageError, "only to SVG"):
+            prepare("--svg-model", "gpt-6-astra")
+
+    def test_gif_output(self):
+        _, endpoint, body = prepare("--output", "loop.gif", "--frames", "4", "--frame-duration", "150",
+                                    "--size", "512x512")
+        self.assertEqual(endpoint, "images/generations")
+        self.assertEqual((body["output_format"], body["frame_count"], body["frame_duration_ms"], body["size"]),
+                         ("gif", 4, 150, "512x512"))
+        _, endpoint, body = prepare("--format", "gif", "--image", str(self.source))
+        self.assertEqual(endpoint, "images/edits")
+        self.assertEqual(body["size"], "auto")
+
+    def test_gif_rejects_unsupported_options(self):
+        for argv, message in ((["--frames", "1"], "between 2 and 16"), (["--frames", "17"], "between 2 and 16"),
+                              (["--frame-duration", "10"], "between 20 and 2000"),
+                              (["--image", str(self.source), "--mask", str(self.source)], "does not support --mask"),
+                              (["--transparent"], "PNG or WebP"), (["--size", "500x500"], "multiples of 16"),
+                              (["--model", "gpt-image-2.5-flare"], "2.6 model")):
+            with self.assertRaisesRegex(generate.UsageError, message):
+                prepare("--format", "gif", *argv)
+        with self.assertRaisesRegex(generate.UsageError, "only to GIF"):
+            prepare("--frames", "4")
+
+    def test_markup_edit(self):
+        _, endpoint, body = prepare("--image", str(self.source), "--markup", str(self.source))
+        self.assertEqual(endpoint, "images/edits")
+        self.assertTrue(body["markup"]["image_url"].startswith("data:image/png;base64,"))
+        _, _, body = prepare("--model", "gpt-image-2.5-sunburst", "--image", str(self.source),
+                             "--markup", str(self.source))
+        self.assertIn("markup", body)
+
+    def test_markup_rejects_invalid_combinations(self):
+        for argv, message in ((["--markup", str(self.source)], "requires --image"),
+                              (["--image", str(self.source), "--markup", str(self.source), "--mask", str(self.source)],
+                               "cannot be combined"),
+                              (["--model", "gpt-image-2", "--image", str(self.source), "--markup", str(self.source)],
+                               "2.5 or 2.6")):
+            with self.assertRaisesRegex(generate.UsageError, message):
+                prepare(*argv)
+
+    def test_extra_cannot_set_new_fields(self):
+        for key in ("complexity", "frame_count", "frame_duration_ms", "markup", "svg"):
+            with self.assertRaisesRegex(generate.UsageError, "--extra cannot set"):
+                prepare("--extra", f"{key}=1")
+
+
 class PostJsonTests(unittest.TestCase):
     def post(self, **urlopen):
         with mock.patch.object(generate.urllib.request, "urlopen", **urlopen):
@@ -290,8 +383,11 @@ class OutputTests(unittest.TestCase):
         self.assertEqual(generate.image_extension(PNG_BYTES), ".png")
         self.assertEqual(generate.image_extension(b"\xff\xd8\xff\xe0"), ".jpg")
         self.assertEqual(generate.image_extension(b"RIFF\x00\x00\x00\x00WEBPVP8 "), ".webp")
+        self.assertEqual(generate.image_extension(b"GIF89a\x00\x02"), ".gif")
+        self.assertEqual(generate.image_extension(b'<svg viewBox="0 0 1 1"/>'), ".svg")
+        self.assertEqual(generate.image_extension(b'<?xml version="1.0"?>\n<svg/>'), ".svg")
         with self.assertRaises(RuntimeError):
-            generate.image_extension(b"GIF89a")
+            generate.image_extension(b"<html></html>")
 
     def test_output_paths(self):
         self.assertEqual(generate.output_paths("out/hero.jpg", "openai", [".png"]), [Path("out/hero.png")])
