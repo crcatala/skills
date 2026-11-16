@@ -16,13 +16,13 @@ Use this skill after screenshots or captures exist locally (for example, from br
 gh pr comment --help | grep -q -- '--attach' && echo ok
 ```
 
-If that prints nothing, `gh` is older than 2.99.0: report the installed version (`gh --version`) and stop. Do not fall back to an extension, to committing images, or to pushing them to a branch, ref, gist or outside host unless the user asks for that.
+If that prints nothing, `gh` is older than 2.99.0: report the installed version (`gh --version`) and stop. 2.103.0 or newer is better: it also accepts more GitHub App tokens. Do not fall back to an extension, to committing images, or to pushing them to a branch, ref, gist or outside host unless the user asks for that.
 
 ## Formats
 
 `gh` accepts `.png`, `.jpg`/`.jpeg`, `.gif`, `.webp`, `.svg`, `.mp4`, `.mov` and `.webm`, and refuses anything else before uploading. Images may be up to 10 MB each. Video is limited by the account's plan (10 MB on free plans, up to 100 MB on paid ones), and the server refuses anything over.
 
-Upload exactly the files that were created, in their original format. Do not rasterize, convert, re-encode, rename or resize them unless the user asks, or a GIF was asked for (next section).
+Upload exactly the files that were created, in their original format. Do not rasterize, convert, re-encode, rename or resize them unless the user asks, or the next section calls for a GIF.
 
 - **SVG uploads as-is.** SVGs from a terminal recorder, such as `NAME.svg` (animated) and `NAME-still.svg`, go up unconverted. Embed the animated one when motion is the point (an interaction, a flow, a dialog opening) and the still for a static view. When unsure, embed the still, or both with a one-line caption each.
 - **Previews are not deliverables.** A PNG made only to look at an SVG or a video frame is a throwaway. Never upload it in place of the original.
@@ -38,7 +38,7 @@ The two render differently in a PR:
 Choose like this:
 
 - **The user asks for a GIF:** deliver a GIF. If what exists is a video or a set of frames, make the GIF with ffmpeg following `{baseDir}/references/gif.md`, and say in your report that you made it and from what.
-- **The user asks for a recording, clip or demo without naming a format:** a GIF when the clip is short (about 10 seconds or less), silent, and should play by itself where the reader is already looking. A video when it is longer, needs sound or fine detail, or a GIF of it would pass 10 MB. Upload the video as it was recorded.
+- **The user asks for a recording, clip or demo without naming a format:** a GIF when the clip is short (about 10 seconds or less), silent, and should play by itself where the reader is already looking; make it from the recording as `references/gif.md` describes and say so in your report. A video when it is longer, needs sound or fine detail, or a GIF of it would pass 10 MB; upload the video as it was recorded.
 - **A GIF over 10 MB:** re-encode it smaller as `references/gif.md` describes. If it still does not fit, ask whether to send the video instead. Never switch formats without saying so.
 - **A terminal recording** is usually already an animated SVG, which plays inline like a GIF. Do not turn it into a GIF unless asked.
 
@@ -53,24 +53,27 @@ Open each file once and check it before uploading: never attach a capture sight 
 
 ## Upload and embed
 
-1. Find the target PR. When it is not supplied, use the current branch's:
+1. Find the target PR and its repository, from inside the repository's checkout. When the PR is not supplied, use the current branch's:
    ```bash
    gh pr view --json number --jq .number
+   gh repo view --json nameWithOwner --jq .nameWithOwner
    ```
    If no PR can be identified, ask the user for one.
 2. Decide where the files go. If the request does not say whether they belong in the PR description or a comment, ask.
-3. Write the markdown in a body file **in the same directory as the files**, referencing each one by a relative path where it should appear, in image syntax for images and video alike: `![Lobby with three phones](./lobby.png)`, and `![Demo](./demo.mp4)` alone in its own paragraph for a video. `gh` resolves paths in a `--body-file` against the file's own directory and rewrites each reference to the uploaded URL; a video's becomes a bare URL, which GitHub renders as a player. A bare path such as `./demo.mp4` on its own line is not a reference: it is left as written and the file is appended at the end. Any attached file the body does not reference is appended at the end. Paths in code spans and fences are left alone. Never write an upload URL by hand.
-4. Run one command that uploads and writes the body, passing every file with `--attach` (repeat the flag; up to 50 files):
+3. Write the markdown in a body file **in the same directory as the files**, referencing each one by a `./` path where it should appear, in image syntax for images and video alike: `![Lobby with three phones](./lobby.png)`, and `![Demo](./demo.mp4)` alone in its own paragraph for a video. `gh` rewrites each reference to the uploaded URL; a video's becomes a bare URL, which GitHub renders as a player. A bare path such as `./demo.mp4` on its own line is not a reference: it is left as written and the file is appended at the end. Any attached file the body does not reference is appended at the end. Paths in code spans and fences are left alone. Never write an upload URL by hand.
+4. `cd` into that directory and run one command that uploads and writes the body, passing every file with `--attach` (repeat the flag; up to 50 files) and the repository with `-R`, since the directory is usually outside the checkout. Running from there matters: before gh 2.103.0, `gh` resolved the body's paths against the working directory, not the body file's, and an unresolved reference stays a local path.
    - **Description:** start from the current body, so nothing in it is lost:
      ```bash
-     gh pr view <PR> --json body --jq .body > <DIR>/body.md
-     # append the new section, with its file references, to <DIR>/body.md
-     gh pr edit <PR> --body-file <DIR>/body.md --attach <DIR>/lobby.png --attach <DIR>/demo.mp4
+     cd <DIR>
+     gh pr view <PR> -R <OWNER/REPO> --json body --jq .body > body.md
+     # append the new section, with its file references, to body.md
+     gh pr edit <PR> -R <OWNER/REPO> --body-file body.md --attach ./lobby.png --attach ./demo.mp4
      ```
-     To append images to the end of the description with no new text, `gh pr edit <PR> --attach <file>` alone keeps the current body.
+     To append images to the end of the description with no new text, `gh pr edit <PR> -R <OWNER/REPO> --attach <file>` alone keeps the current body.
    - **Comment** (testing evidence or a one-off update), with concise context around the images:
      ```bash
-     gh pr comment <PR> --body-file <DIR>/comment.md --attach <DIR>/lobby.png
+     cd <DIR>
+     gh pr comment <PR> -R <OWNER/REPO> --body-file comment.md --attach ./lobby.png
      ```
    - Alt text: write it in the body's reference, or after a `#` for an appended image (`--attach './lobby.png#Lobby with three phones'`). Video takes no alt text.
 5. If some files upload and others fail, `gh` still writes the body with the ones that succeeded and exits non-zero. Report which failed and why. Do not rerun the whole command, which would upload the successful files a second time.
@@ -80,8 +83,8 @@ Open each file once and check it before uploading: never attach a capture sight 
 Read back what was written and confirm every file became an upload URL and no local path is left:
 
 ```bash
-gh pr view <PR> --json body --jq .body | grep -n -E 'user-attachments|\]\(\./|^\./'
-gh pr view <PR> --json comments --jq '.comments[-1].body'   # for a comment
+gh pr view <PR> -R <OWNER/REPO> --json body --jq .body | grep -n -E 'user-attachments|\]\(\./|^\./'
+gh pr view <PR> -R <OWNER/REPO> --json comments --jq '.comments[-1].body'   # for a comment
 ```
 
 Each image appears as `![alt](https://github.com/user-attachments/assets/<id>)` and each video as a bare `https://github.com/user-attachments/assets/<id>` line. On a private repository those URLs open only in a signed-in browser, so `curl` cannot confirm them; tell the user to open the PR to see that images render and animations play.
