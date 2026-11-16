@@ -59,7 +59,7 @@ Open each file once and check it before uploading: never attach a capture sight 
    ```
    If no PR can be identified, ask the user for one.
 2. Decide where the files go. If the request does not say whether they belong in the PR description or a comment, ask.
-3. Write the markdown in a body file **in the same directory as the files**, referencing each one by a relative path where it should appear: `![Lobby with three phones](./lobby.png)` for an image. Put a video on a line of its own as a bare path, `./demo.mp4`. `gh` resolves paths in a `--body-file` against the file's own directory, then rewrites each reference to the uploaded URL. A file you attach but do not reference is appended at the end. Never write an upload URL by hand.
+3. Write the markdown in a body file **in the same directory as the files**, referencing each one by a relative path where it should appear, in image syntax for images and video alike: `![Lobby with three phones](./lobby.png)`, and `![Demo](./demo.mp4)` alone in its own paragraph for a video. `gh` resolves paths in a `--body-file` against the file's own directory and rewrites each reference to the uploaded URL; a video's becomes a bare URL, which GitHub renders as a player. A bare path such as `./demo.mp4` on its own line is not a reference: it is left as written and the file is appended at the end. Any attached file the body does not reference is appended at the end. Paths in code spans and fences are left alone. Never write an upload URL by hand.
 4. Run one command that uploads and writes the body, passing every file with `--attach` (repeat the flag; up to 50 files):
    - **Description:** start from the current body, so nothing in it is lost:
      ```bash
@@ -80,7 +80,7 @@ Open each file once and check it before uploading: never attach a capture sight 
 Read back what was written and confirm every file became an upload URL and no local path is left:
 
 ```bash
-gh pr view <PR> --json body --jq .body | grep -n -E 'user-attachments|\./'
+gh pr view <PR> --json body --jq .body | grep -n -E 'user-attachments|\]\(\./|^\./'
 gh pr view <PR> --json comments --jq '.comments[-1].body'   # for a comment
 ```
 
