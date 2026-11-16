@@ -45,7 +45,7 @@ name is passed to the agent as extra instructions, in both harnesses:
 | [`agent-browser`](skills/agent-browser/SKILL.md) | Browser QA policy: task sessions, UI verification, screenshot evidence; syntax from installed CLI guides | `agent-browser`, Chrome |
 | [`brave-web`](skills/brave-web/SKILL.md) | Browser-free web search and URL-to-markdown extraction | bun, `BRAVE_API_KEY` |
 | [`exa-code`](skills/exa-code/SKILL.md) | Code docs and API examples via Exa | bun, `EXA_API_KEY` |
-| [`github-pr-screenshots`](skills/github-pr-screenshots/SKILL.md) | Upload screenshots to a PR and embed them | `gh`, `gh-attach` |
+| [`github-pr-screenshots`](skills/github-pr-screenshots/SKILL.md) | Attach screenshots, GIFs and video to a PR with `gh --attach`; makes GIFs on request | `gh` 2.99+; GIFs: `ffmpeg` |
 | [`grok-research`](skills/grok-research/SKILL.md) | Deep agentic web + X research via Grok | python3, `XAI_API_KEY` |
 | [`image-gen`](skills/image-gen/SKILL.md) | Generate or edit images (OpenAI GPT Image, xAI Grok Imagine) | python3, `OPENAI_API_KEY` and/or `XAI_API_KEY` |
 | [`ralph`](skills/ralph/SKILL.md) | Autonomous, ticket-native campaign delivery | `ralph`, `tk`, `gh`, node 22+ |

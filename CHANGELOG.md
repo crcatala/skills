@@ -7,6 +7,12 @@ separately unless they carry `metadata.version` for their own breaking changes.
 ## [Unreleased]
 
 ### Changed
+- `github-pr-screenshots`: uploads with the GitHub CLI's built-in `--attach` flag (gh 2.99.0+) instead of the
+  `gh-attach` extension, which is no longer installed or used. Files go to GitHub's user-attachments storage, where
+  the web editor's uploads go, instead of commits on `refs/uploads/issues/<n>` refs in the repository. The body file
+  references files by relative path and `gh` rewrites them to upload URLs. Video renders as a player. Adds when to
+  pick a GIF or a video, and `references/gif.md` for making a GIF with ffmpeg from a video or frames (replacing
+  gh-attach's `--gif`) and fitting it under the 10 MB image limit.
 - `image-gen`: the default OpenAI model is now `gpt-image-2.6-flare`. New options for GPT Image 2.6:
   `--complexity`, SVG output (`--format svg`, `--svg-model`), animated GIF output (`--format gif`,
   `--frames`, `--frame-duration`), and markup-guided edits (`--markup`, also on 2.5). Documents
