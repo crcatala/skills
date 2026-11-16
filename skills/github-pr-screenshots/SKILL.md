@@ -1,68 +1,97 @@
 ---
 name: github-pr-screenshots
-description: Upload local screenshots or captures (PNG, SVG, other image files) to a GitHub pull request with gh-attach and embed the returned markdown in the requested PR description or comment. Use when the user asks to upload, attach, add, or include screenshots, terminal captures or other images from testing in a PR.
-compatibility: "Requires the gh CLI (authenticated) with the gh-attach extension."
+description: Attach local screenshots, terminal captures, GIFs or video recordings (PNG, JPEG, GIF, WebP, SVG, MP4, MOV, WebM) to a GitHub pull request description or comment with the GitHub CLI's built-in --attach flag, and make a GIF with ffmpeg when one is asked for. Use when the user asks to upload, attach, add, or include screenshots, captures, GIFs, recordings or other images from testing in a PR.
+compatibility: "Requires the gh CLI 2.99.0 or newer, authenticated with write access to the repository. Making a GIF from a video or frames needs ffmpeg."
 ---
 
 # GitHub PR Screenshots
 
-Use this skill after screenshots or captures have been created locally (for example, during browser-based app testing or a terminal recording). Do not take screenshots unless the request calls for them.
+Use this skill after screenshots or captures exist locally (for example, from browser-based app testing or a terminal recording). Do not take screenshots unless the request calls for them. `{baseDir}` below means the directory containing this SKILL.md.
 
-## Upload the files as produced
+`gh` uploads each file to GitHub's user-attachments storage, the same place a file dragged into the web editor goes, and writes its URL into the PR body or comment. Nothing is committed to the repository. On a private repository only people with access can open the files; on a public one anyone with the URL can. An upload cannot be deleted from the command line, so check every file before it goes up.
 
-Upload exactly the files that were created, in their original format. Do not rasterize, convert, re-encode, rename or resize them unless the user asks.
+## Requirements
 
-- **SVG uploads as-is.** `gh attach` accepted `.svg` files and stored them unchanged (verified with gh-attach v0.6.0 on a private repo). SVGs from a terminal recorder, such as `NAME.svg` (animated) and `NAME-still.svg`, go in unconverted. Do not assume GitHub rejects a format; try it.
-- **Previews are not deliverables.** A PNG you made only to look at an SVG (for example to check a frame) is a throwaway. Never upload it in place of the SVG.
-- **Which SVG to embed:** the animated one when motion is the point (an interaction, a flow, a dialog opening); the still for a static view. When unsure, embed the still, or both with a one-line caption each.
-- **If an upload fails,** report the exact error and ask. Do not convert and retry on your own. If the user does ask for a different format, say in your report that you changed it, and from what.
+```bash
+gh pr comment --help | grep -q -- '--attach' && echo ok
+```
+
+If that prints nothing, `gh` is older than 2.99.0: report the installed version (`gh --version`) and stop. 2.103.0 or newer is better: it also accepts more GitHub App tokens. Do not fall back to an extension, to committing images, or to pushing them to a branch, ref, gist or outside host unless the user asks for that.
+
+## Formats
+
+`gh` accepts `.png`, `.jpg`/`.jpeg`, `.gif`, `.webp`, `.svg`, `.mp4`, `.mov` and `.webm`, and refuses anything else before uploading. Images may be up to 10 MB each. Video is limited by the account's plan (10 MB on free plans, up to 100 MB on paid ones), and the server refuses anything over.
+
+Upload exactly the files that were created, in their original format. Do not rasterize, convert, re-encode, rename or resize them unless the user asks, or the next section calls for a GIF.
+
+- **SVG uploads as-is.** SVGs from a terminal recorder, such as `NAME.svg` (animated) and `NAME-still.svg`, go up unconverted. Embed the animated one when motion is the point (an interaction, a flow, a dialog opening) and the still for a static view. When unsure, embed the still, or both with a one-line caption each.
+- **Previews are not deliverables.** A PNG made only to look at an SVG or a video frame is a throwaway. Never upload it in place of the original.
+- **If an upload fails,** report the exact error and ask. Do not convert and retry on your own. If the user then asks for another format, say in your report what you changed it from and to.
+
+## GIF or video
+
+The two render differently in a PR:
+
+- A **GIF** is an image: it plays inline on its own and loops, but it has no sound, at most 256 colours per frame, and the 10 MB image limit.
+- An **MP4/MOV/WebM** renders as a video player the reader starts. It is sharper and much smaller for the same clip, and it can have sound.
+
+Choose like this:
+
+- **The user asks for a GIF:** deliver a GIF. If what exists is a video or a set of frames, make the GIF with ffmpeg following `{baseDir}/references/gif.md`, and say in your report that you made it and from what.
+- **The user asks for a recording, clip or demo without naming a format:** a GIF when the clip is short (about 10 seconds or less), silent, and should play by itself where the reader is already looking; make it from the recording as `references/gif.md` describes and say so in your report. A video when it is longer, needs sound or fine detail, or a GIF of it would pass 10 MB; upload the video as it was recorded.
+- **A GIF over 10 MB:** re-encode it smaller as `references/gif.md` describes. If it still does not fit, ask whether to send the video instead. Never switch formats without saying so.
+- **A terminal recording** is usually already an animated SVG, which plays inline like a GIF. Do not turn it into a GIF unless asked.
 
 ## Verify before uploading
 
-Open each screenshot once and check it before uploading — never attach a capture sight unseen. In particular:
+Open each file once and check it before uploading: never attach a capture sight unseen. In particular:
 
-- **Full-page captures:** `loading="lazy"` images below the fold render as blank areas unless the page was scrolled through before capturing. If the screenshot came from a browser tool's full-page capture, scroll the full page in increments first, return to top, then capture.
-- Confirm the intended page state (logged in vs. out, correct view/tab, no stray modals, tooltips, or hover highlights).
-- **SVGs:** look at a rasterized throwaway copy (or open the file), then upload the original SVG, not the copy.
+- **Full-page captures:** `loading="lazy"` images below the fold render as blank areas unless the page was scrolled through before capturing. If the screenshot came from a browser tool's full-page capture, scroll the full page in increments first, return to the top, then capture.
+- Confirm the intended page state (logged in or out, correct view or tab, no stray modals, tooltips or hover highlights) and that nothing sensitive is visible (tokens, emails, private data).
+- **SVG, GIF and video:** look at a rasterized throwaway frame or two, then upload the original.
+- Check sizes against the limits above (`ls -l` or `stat -c %s`).
 
-## Upload
+## Upload and embed
 
-1. Determine the target PR number. When it is not supplied, use the PR for the current branch:
+1. Find the target PR and its repository, from inside the repository's checkout. When the PR is not supplied, use the current branch's:
    ```bash
    gh pr view --json number --jq .number
+   gh repo view --json nameWithOwner --jq .nameWithOwner
    ```
    If no PR can be identified, ask the user for one.
-2. Verify that the expected GitHub CLI extension and pinned version are installed. If not, force-install the expected version:
-   ```bash
-   if ! gh extension list | awk -F '\t' '$1 == "gh attach" && $2 == "enthus-appdev/gh-attach" && $3 == "v0.6.0" { found = 1 } END { exit !found }'; then
-     gh extension install enthus-appdev/gh-attach --pin v0.6.0 --force
-   fi
-   ```
-3. Upload the actual local file or files and capture the markdown emitted by the command:
-   ```bash
-   gh attach <PR_NUMBER> /path/to/screenshot.png
-   gh attach <PR_NUMBER> /path/to/demo.svg /path/to/demo-still.svg
-   gh attach <PR_NUMBER> /path/to/screenshot-1.png /path/to/capture.svg
-   ```
+2. Decide where the files go. If the request does not say whether they belong in the PR description or a comment, ask.
+3. Write the markdown in a body file **in the same directory as the files**, referencing each one by a `./` path where it should appear, in image syntax for images and video alike: `![Lobby with three phones](./lobby.png)`, and `![Demo](./demo.mp4)` alone in its own paragraph for a video. `gh` rewrites each reference to the uploaded URL; a video's becomes a bare URL, which GitHub renders as a player. A bare path such as `./demo.mp4` on its own line is not a reference: it is left as written and the file is appended at the end. Any attached file the body does not reference is appended at the end. Paths in code spans and fences are left alone. Never write an upload URL by hand.
+4. `cd` into that directory and run one command that uploads and writes the body, passing every file with `--attach` (repeat the flag; up to 50 files) and the repository with `-R`, since the directory is usually outside the checkout. Running from there matters: before gh 2.103.0, `gh` resolved the body's paths against the working directory, not the body file's, and an unresolved reference stays a local path.
+   - **Description:** start from the current body, so nothing in it is lost:
+     ```bash
+     cd <DIR>
+     gh pr view <PR> -R <OWNER/REPO> --json body --jq .body > body.md
+     # append the new section, with its file references, to body.md
+     gh pr edit <PR> -R <OWNER/REPO> --body-file body.md --attach ./lobby.png --attach ./demo.mp4
+     ```
+     To append images to the end of the description with no new text, `gh pr edit <PR> -R <OWNER/REPO> --attach <file>` alone keeps the current body.
+   - **Comment** (testing evidence or a one-off update), with concise context around the images:
+     ```bash
+     cd <DIR>
+     gh pr comment <PR> -R <OWNER/REPO> --body-file comment.md --attach ./lobby.png
+     ```
+   - Alt text: write it in the body's reference, or after a `#` for an appended image (`--attach './lobby.png#Lobby with three phones'`). Video takes no alt text.
+5. If some files upload and others fail, `gh` still writes the body with the ones that succeeded and exits non-zero. Report which failed and why. Do not rerun the whole command, which would upload the successful files a second time.
 
-Use the exact markdown returned by `gh attach`; never construct image URLs or markdown manually.
+## Check the result
 
-## Add the screenshots to the PR
-
-Put the returned markdown in the location the user requested:
-
-- To update the PR description, retrieve the current body with `gh pr view <PR_NUMBER> --json body --jq .body`, append the relevant explanatory text and screenshot markdown, then update that same PR with `gh pr edit <PR_NUMBER> --body-file <FILE>`.
-- To add testing evidence or a one-off update, post a comment on that same PR with `gh pr comment <PR_NUMBER> --body-file <FILE>`, including concise context and the screenshot markdown.
-- If the request only says to upload a screenshot and does not name a destination, ask whether it should go in the PR description or a comment.
-
-Report the PR number, where the files were added, and the format of each file uploaded. Keep the source files available until the upload succeeds.
-
-## Check that the files were stored
-
-On a private repo you cannot confirm an embed with `curl`: anonymous requests to the `github.com/<owner>/<repo>/blob/<sha>/<file>?raw=true` URLs return 404, and even an authenticated `curl` fails because those web URLs need a browser session. Check storage through the API instead, taking OWNER, REPO, SHA and FILE from the URL in the returned markdown:
+Read back what was written and confirm every file became an upload URL and no local path is left:
 
 ```bash
-gh api "repos/OWNER/REPO/contents/FILE?ref=SHA" --jq '{path, type, size}'
+gh pr view <PR> -R <OWNER/REPO> --json body --jq .body | grep -n -E 'user-attachments|\]\(\./|^\./'
+gh pr view <PR> -R <OWNER/REPO> --json comments --jq '.comments[-1].body'   # for a comment
 ```
 
-A result means the file is stored, not that it renders. For an animated SVG, tell the user to open the PR to confirm the image shows and animates.
+Each image appears as `![alt](https://github.com/user-attachments/assets/<id>)` and each video as a bare `https://github.com/user-attachments/assets/<id>` line. On a private repository those URLs open only in a signed-in browser, so `curl` cannot confirm them; tell the user to open the PR to see that images render and animations play.
+
+Report the PR number, where the files were added (description or comment), and each file's format, including any GIF you made and its source.
+
+## When the upload is refused
+
+- `attaching files requires write access to the repository`: the account cannot write to that repository. Report it and stop.
+- An error from a sandboxed environment (for example `GitHub GraphQL is not available`, or an HTTP 415 or 403 from `uploads.github.com`): the environment's GitHub proxy or token does not allow uploads. Some GitHub App tokens are refused too. Report the exact error, say where the files are on disk, and stop.
