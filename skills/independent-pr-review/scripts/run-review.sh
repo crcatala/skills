@@ -8,10 +8,11 @@
 #   run-review.sh --list
 #
 # A reviewer is a name from the config, or an ad-hoc spec harness:model[:effort]
-# (e.g. codex:gpt-6.1-sol:high, claude:opus, pi:anthropic/claude-sonnet-5-5:medium).
+# (e.g. codex:gpt-6.2-sol:high, claude:opus, pi:anthropic/claude-sonnet-5-5:medium).
 #
 # Config: $INDEPENDENT_PR_REVIEW_CONFIG, else ${XDG_CONFIG_HOME:-~/.config}/independent-pr-review/config.json.
-# Without a config file, one built-in reviewer is used (codex, gpt-6.1-sol, medium effort).
+# Without a config file, the built-in presets are used: codex-sol (default; codex, gpt-6.2-sol, medium),
+# codex-astra (codex, gpt-6.2-astra, medium) and claude-fable (claude, claude-fable-5-2, medium).
 #
 # Output: <git common dir>/independent-pr-review/<branch>/<timestamp>/<reviewer>.{review.md,triage.md,log}
 # With $INDEPENDENT_PR_REVIEW_OUTPUT_DIR set: $INDEPENDENT_PR_REVIEW_OUTPUT_DIR/<repo>/<branch>/<timestamp>/...
@@ -28,7 +29,11 @@ BUILTIN_CONFIG='{
   "default": ["codex-sol"],
   "timeout_minutes": 30,
   "keep_runs": 10,
-  "reviewers": {"codex-sol": {"harness": "codex", "model": "gpt-6.1-sol", "effort": "medium"}}
+  "reviewers": {
+    "codex-sol": {"harness": "codex", "model": "gpt-6.2-sol", "effort": "medium"},
+    "codex-astra": {"harness": "codex", "model": "gpt-6.2-astra", "effort": "medium"},
+    "claude-fable": {"harness": "claude", "model": "claude-fable-5-2", "effort": "medium"}
+  }
 }'
 
 die() { echo "error: $*" >&2; exit 2; }

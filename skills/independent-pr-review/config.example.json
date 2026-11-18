@@ -3,7 +3,9 @@
   "timeout_minutes": 30,
   "keep_runs": 10,
   "reviewers": {
-    "codex-sol": { "harness": "codex", "model": "gpt-6.1-sol", "effort": "medium" },
+    "codex-sol": { "harness": "codex", "model": "gpt-6.2-sol", "effort": "medium" },
+    "codex-astra": { "harness": "codex", "model": "gpt-6.2-astra", "effort": "medium" },
+    "claude-fable": { "harness": "claude", "model": "claude-fable-5-2", "effort": "medium" },
     "claude-opus": { "harness": "claude", "model": "opus", "effort": "high" },
     "pi-sonnet": { "harness": "pi", "model": "anthropic/claude-sonnet-5-5", "effort": "medium" }
   }
