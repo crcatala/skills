@@ -25,8 +25,17 @@ the user what to install and stop.
 ## Configuration
 
 `${XDG_CONFIG_HOME:-~/.config}/independent-pr-review/config.json`, or the path
-in `INDEPENDENT_PR_REVIEW_CONFIG`. Without a file, one built-in reviewer runs:
-codex, `gpt-6.1-sol`, medium effort. See `{baseDir}/config.example.json`:
+in `INDEPENDENT_PR_REVIEW_CONFIG`. Without a file, these built-in presets are
+available, and `codex-sol` runs by default:
+
+| Name | Harness | Model | Effort |
+| --- | --- | --- | --- |
+| `codex-sol` | codex | `gpt-6.2-sol` | medium |
+| `codex-astra` | codex | `gpt-6.2-astra` | medium |
+| `claude-fable` | claude | `claude-fable-5-2` | medium |
+
+A config file replaces the presets; copy the ones you want from
+`{baseDir}/config.example.json`. Its fields:
 
 - `reviewers`: named reviewers, each `{harness, model, effort}`. `model` and
   `effort` are optional and passed as-is to the harness (codex
@@ -49,7 +58,7 @@ elsewhere instead (as `<dir>/<repo>/<branch>/<timestamp>/`).
    - Nothing about reviewers: the configured default (no flag).
    - `all`, "all reviewers", "every reviewer": `--all`.
    - Configured names: `--reviewers name1,name2`.
-   - Ad-hoc `harness:model[:effort]` (e.g. `codex:gpt-6.1-sol:high`): pass it
+   - Ad-hoc `harness:model[:effort]` (e.g. `codex:gpt-6.2-sol:high`): pass it
      in `--reviewers` too; it can be mixed with names.
    - A PR number or URL: `--pr <it>`. Otherwise the reviewer finds the PR for
      the current branch.

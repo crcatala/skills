@@ -22,7 +22,9 @@ separately unless they carry `metadata.version` for their own breaking changes.
   branch's PR (Good/Bad/Ugly) and triages its own findings in the same session. The
   invoking agent then assesses the triaged findings as the author. Reviewers come from
   `~/.config/independent-pr-review/config.json` (one default; `all`, named or ad-hoc
-  `harness:model:effort` on request); results are saved under the git common dir (or
+  `harness:model:effort` on request). Without a config file, built-in presets `codex-sol`
+  (`gpt-6.2-sol`, the default), `codex-astra` (`gpt-6.2-astra`) and `claude-fable`
+  (`claude-fable-5-2`), all at medium effort, are available; results are saved under the git common dir (or
   `INDEPENDENT_PR_REVIEW_OUTPUT_DIR`), keeping the newest `keep_runs` runs per branch.
 - `terminal-capture`: capture-only workflow for verified terminal output. Produces
   animated plus static SVG by default (scripted PTY recorder to asciicast v2, rendered
