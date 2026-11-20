@@ -22,13 +22,24 @@ Check: `command -v git jq gh` plus the CLI for each reviewer harness (`codex`,
 `claude` or `pi`); `gh auth status` must pass. If something is missing, tell
 the user what to install and stop.
 
-The `antigravity` harness finds Google's Antigravity CLI itself, in this order:
-`ANTIGRAVITY_CLI` (a path), `agy` or `antigravity` on `PATH` (only if it is the
-CLI, not the Antigravity IDE launcher), then the copy T3 Code installs under
-`<T3 home>/tools/antigravity-acp/`, where T3 home is `T3CODE_HOME`, `~/.t3` or
-`${XDG_DATA_HOME:-~/.local/share}/t3`. `--list` shows the path it found. The
-CLI must be signed in: T3 Code keeps its Antigravity sign-in in its own profile,
-so run the CLI once in a terminal to sign in for it.
+### Antigravity reviewers (`antigravity-neon`)
+
+Setup, once per machine:
+
+1. **Get the CLI.** Nothing to do if Antigravity is set up in T3 Code: the
+   script uses T3's copy. Otherwise install Google's standalone `agy` CLI, or
+   set `ANTIGRAVITY_CLI` to its path.
+2. **Sign the CLI in**, even if T3 Code is already signed in to Antigravity.
+   T3 keeps its sign-in to itself, so it does not carry over. Run the CLI
+   (`--list` prints its path) in a terminal, open the Google link it shows,
+   sign in, and paste the code back if asked.
+
+`bash {baseDir}/scripts/run-review.sh --list` shows the CLI it found and
+either `ready` or what is missing, with the exact command to run. It looks in
+this order: `ANTIGRAVITY_CLI`; `agy` or `antigravity` on `PATH` (not the
+Antigravity IDE launcher); the copy T3 Code keeps under
+`<T3 home>/tools/antigravity-acp/` (T3 home: `T3CODE_HOME`, `~/.t3` or
+`${XDG_DATA_HOME:-~/.local/share}/t3`).
 
 ## Configuration
 
@@ -79,6 +90,12 @@ elsewhere instead (as `<dir>/<repo>/<branch>/<timestamp>/`).
 
    If a name is not configured, run `--list`, tell the user, and stop.
 
+   If an `antigravity` reviewer is picked, run `--list` first. If it does not
+   say `ready` under the antigravity CLI, give the user that message word for
+   word; it says what to install or run. Do not sign in or install anything
+   yourself: sign-in needs the user's browser. Run the other picked reviewers,
+   if any; otherwise stop.
+
 2. **Run the reviewers.** From the repository root, with the PR branch checked out:
 
    ```bash
@@ -95,7 +112,8 @@ elsewhere instead (as `<dir>/<repo>/<branch>/<timestamp>/`).
    its `triage.md` and `review.md` and a resume command, or why it failed.
    Read every `triage.md`. Open `review.md` only when a triage item needs more
    detail. Report any failed reviewer with its reason and continue with the
-   rest; if all failed, show the reasons and the log paths and stop.
+   rest. Give a reason that starts with `setup needed:` to the user word for
+   word. If all failed, show the reasons and the log paths and stop.
 
 4. **Show the triage.** Give the user the reviewers' action items, briefly. With
    several reviewers, merge duplicates and note which reviewers raised each.

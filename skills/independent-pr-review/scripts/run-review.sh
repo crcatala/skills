@@ -58,6 +58,9 @@ fi
 
 cfg() { jq -r "$1" <<<"$config_json"; }
 
+# T3 Code's home directories to look in: $T3CODE_HOME, ~/.t3 (its default), ${XDG_DATA_HOME:-~/.local/share}/t3.
+t3_homes() { printf '%s\n' "${T3CODE_HOME:-}" "$HOME/.t3" "${XDG_DATA_HOME:-$HOME/.local/share}/t3" | grep .; }
+
 # Prints the path of the Antigravity CLI. Order: $ANTIGRAVITY_CLI; agy or antigravity on PATH
 # (antigravity only when it is the CLI, not the Antigravity IDE's launcher); the release T3 Code
 # marks active in <T3 home>/tools/antigravity-acp/<platform>-<arch>/active.json.
@@ -78,12 +81,43 @@ find_antigravity() {
         x86_64|amd64) arch=x64 ;; aarch64|arm64) arch=arm64 ;; *) return ;;
     esac
     exe=antigravity; [ "$os" = win32 ] && exe=agy.exe
-    for t3_home in "${T3CODE_HOME:-}" "$HOME/.t3" "${XDG_DATA_HOME:-$HOME/.local/share}/t3"; do
-        [ -n "$t3_home" ] || continue
+    while IFS= read -r t3_home; do
         cand="$t3_home/tools/antigravity-acp/$os-$arch"
         release="$(jq -r '.releaseId // empty' "$cand/active.json" 2>/dev/null)" || continue
         [ -n "$release" ] && [ -x "$cand/versions/$release/$exe" ] && { echo "$cand/versions/$release/$exe"; return; }
-    done
+    done < <(t3_homes)
+}
+
+# True when T3 Code holds its own Antigravity sign-in. T3 keeps it in its private profile,
+# which the CLI's print mode cannot read, so it does not sign the CLI in.
+t3_antigravity_signed_in() {
+    local t3_home token
+    while IFS= read -r t3_home; do
+        for token in "$t3_home"/userdata/providers/antigravity/*/antigravity-acp/{antigravity-oauth-token,acp_token.json}; do
+            [ -s "$token" ] && return 0
+        done
+    done < <(t3_homes)
+    return 1
+}
+
+# Checks the Antigravity CLI at $1 (empty: not found) can run reviews. Prints nothing when it can,
+# else one line telling the user what to do, and returns 1. `models` answers at once when signed out.
+antigravity_setup_problem() {
+    local cli="$1" t=() run_cmd out
+    if [ -z "$cli" ]; then
+        echo "Antigravity CLI not found. Set up Antigravity in T3 Code, or install Google's standalone agy CLI, or set ANTIGRAVITY_CLI to the CLI's path."
+        return 1
+    fi
+    command -v timeout >/dev/null && t=(timeout 60)
+    out="$(AGY_CLI_DISABLE_AUTO_UPDATE=1 ${t[@]+"${t[@]}"} "$cli" models </dev/null 2>&1)"
+    [[ "$out" == *"Please sign in"* ]] || return 0
+    run_cmd="$(printf '%q' "$cli")"
+    if t3_antigravity_signed_in; then
+        echo "Antigravity CLI is not signed in. Being signed in to Antigravity in T3 Code does not count: T3 keeps that sign-in to itself, so the CLI needs its own, once per machine. Run $run_cmd in a terminal, open the Google link it shows, sign in, and paste the code back if asked."
+    else
+        echo "Antigravity CLI is not signed in. Sign it in once per machine: run $run_cmd in a terminal, open the Google link it shows, sign in, and paste the code back if asked."
+    fi
+    return 1
 }
 
 reviewers=""
@@ -107,7 +141,9 @@ if [ "$list" -eq 1 ]; then
     echo "default: $(cfg '(.default // [(.reviewers | keys_unsorted)[0]]) | join(", ")')"
     cfg '.reviewers | to_entries[] | "  \(.key): \(.value.harness) \(.value.model // "(harness default model)") \(.value.effort // "(default effort)")"'
     if [ "$(cfg '[.reviewers[] | select(.harness == "antigravity")] | length')" -gt 0 ]; then
-        echo "antigravity CLI: $(find_antigravity | grep . || echo "not found (set ANTIGRAVITY_CLI)")"
+        agy_cli="$(find_antigravity)"
+        echo "antigravity CLI: ${agy_cli:-not found}"
+        if agy_problem="$(antigravity_setup_problem "$agy_cli")"; then echo "  ready"; else echo "  $agy_problem"; fi
     fi
     exit 0
 fi
@@ -161,12 +197,12 @@ run() { "${clean_env[@]}" ${timeout_cmd[@]+"${timeout_cmd[@]}"} "$@" </dev/null;
 # <name>.log and <name>.status ("ok <resume command>" or "failed <reason>").
 review_one() {
     local name="$1" harness="$2" model="$3" effort="$4"
-    local base="$out_dir/$name" log="$out_dir/$name.log" sid flags=() cli
+    local base="$out_dir/$name" log="$out_dir/$name.log" sid flags=() cli problem
 
     fail() { echo "failed $*" > "$base.status"; }
     if [ "$harness" = antigravity ]; then
         cli="$(find_antigravity)"
-        [ -n "$cli" ] || { fail "Antigravity CLI not found (set ANTIGRAVITY_CLI, put agy on PATH, or install Antigravity in T3 Code)"; return; }
+        problem="$(antigravity_setup_problem "$cli")" || { fail "setup needed: $problem"; return; }
     else
         command -v "$harness" >/dev/null || { fail "$harness CLI not found on PATH"; return; }
     fi
@@ -224,7 +260,7 @@ review_one() {
                 local code=$?
                 # Not signed in: the CLI prints a sign-in link, waits 60s for a code, then fails.
                 if grep -q '^Authentication required' "$out.json" "$log" 2>/dev/null; then
-                    fail "Antigravity CLI is not signed in: run $cli once in a terminal and sign in"
+                    fail "setup needed: Antigravity CLI is not signed in. Run $(printf '%q' "$cli") in a terminal and sign in."
                     return 1
                 fi
                 if [ "$code" -ne 0 ] || ! jq -e '.status == "SUCCESS"' "$out.json" >/dev/null 2>&1; then
