@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run one or more independent PR reviewers (codex, claude, pi) without a UI, in parallel.
+# Run one or more independent PR reviewers (codex, claude, pi, antigravity) without a UI, in parallel.
 # Each reviewer gets two turns in one session: the review prompt, then the triage prompt.
 # The triage reply is written to a file the calling agent reads.
 #
@@ -8,11 +8,17 @@
 #   run-review.sh --list
 #
 # A reviewer is a name from the config, or an ad-hoc spec harness:model[:effort]
-# (e.g. codex:gpt-6.2-sol:high, claude:opus, pi:anthropic/claude-sonnet-5-5:medium).
+# (e.g. codex:gpt-6.2-sol:high, claude:opus, pi:anthropic/claude-sonnet-5-5:medium,
+# antigravity:gemini-4-neon:high).
+#
+# The antigravity harness runs Google's Antigravity CLI: $ANTIGRAVITY_CLI if set, else agy or
+# antigravity on PATH, else the copy T3 Code installs under <T3 home>/tools/antigravity-acp
+# (T3 home: $T3CODE_HOME, ~/.t3 or ${XDG_DATA_HOME:-~/.local/share}/t3).
 #
 # Config: $INDEPENDENT_PR_REVIEW_CONFIG, else ${XDG_CONFIG_HOME:-~/.config}/independent-pr-review/config.json.
 # Without a config file, the built-in presets are used: codex-sol (default; codex, gpt-6.2-sol, medium),
-# codex-astra (codex, gpt-6.2-astra, medium) and claude-fable (claude, claude-fable-5-2, medium).
+# codex-astra (codex, gpt-6.2-astra, medium), claude-fable (claude, claude-fable-5-2, medium) and
+# antigravity-neon (antigravity, gemini-4-neon, medium).
 #
 # Output: <git common dir>/independent-pr-review/<branch>/<timestamp>/<reviewer>.{review.md,triage.md,log}
 # With $INDEPENDENT_PR_REVIEW_OUTPUT_DIR set: $INDEPENDENT_PR_REVIEW_OUTPUT_DIR/<repo>/<branch>/<timestamp>/...
@@ -32,7 +38,8 @@ BUILTIN_CONFIG='{
   "reviewers": {
     "codex-sol": {"harness": "codex", "model": "gpt-6.2-sol", "effort": "medium"},
     "codex-astra": {"harness": "codex", "model": "gpt-6.2-astra", "effort": "medium"},
-    "claude-fable": {"harness": "claude", "model": "claude-fable-5-2", "effort": "medium"}
+    "claude-fable": {"harness": "claude", "model": "claude-fable-5-2", "effort": "medium"},
+    "antigravity-neon": {"harness": "antigravity", "model": "gemini-4-neon", "effort": "medium"}
   }
 }'
 
@@ -50,6 +57,34 @@ else
 fi
 
 cfg() { jq -r "$1" <<<"$config_json"; }
+
+# Prints the path of the Antigravity CLI. Order: $ANTIGRAVITY_CLI; agy or antigravity on PATH
+# (antigravity only when it is the CLI, not the Antigravity IDE's launcher); the release T3 Code
+# marks active in <T3 home>/tools/antigravity-acp/<platform>-<arch>/active.json.
+find_antigravity() {
+    local cand t3_home os arch exe release
+    if [ -n "${ANTIGRAVITY_CLI:-}" ]; then
+        [ -x "$ANTIGRAVITY_CLI" ] && echo "$ANTIGRAVITY_CLI"
+        return
+    fi
+    for cand in agy antigravity; do
+        cand="$(command -v "$cand")" || continue
+        "$cand" --help 2>&1 | grep -q -- '--print' && { echo "$cand"; return; }
+    done
+    case "$(uname -s)" in
+        Linux) os=linux ;; Darwin) os=darwin ;; MINGW*|MSYS*|CYGWIN*) os=win32 ;; *) return ;;
+    esac
+    case "$(uname -m)" in
+        x86_64|amd64) arch=x64 ;; aarch64|arm64) arch=arm64 ;; *) return ;;
+    esac
+    exe=antigravity; [ "$os" = win32 ] && exe=agy.exe
+    for t3_home in "${T3CODE_HOME:-}" "$HOME/.t3" "${XDG_DATA_HOME:-$HOME/.local/share}/t3"; do
+        [ -n "$t3_home" ] || continue
+        cand="$t3_home/tools/antigravity-acp/$os-$arch"
+        release="$(jq -r '.releaseId // empty' "$cand/active.json" 2>/dev/null)" || continue
+        [ -n "$release" ] && [ -x "$cand/versions/$release/$exe" ] && { echo "$cand/versions/$release/$exe"; return; }
+    done
+}
 
 reviewers=""
 pr=""
@@ -71,6 +106,9 @@ if [ "$list" -eq 1 ]; then
     echo "config: $config_source"
     echo "default: $(cfg '(.default // [(.reviewers | keys_unsorted)[0]]) | join(", ")')"
     cfg '.reviewers | to_entries[] | "  \(.key): \(.value.harness) \(.value.model // "(harness default model)") \(.value.effort // "(default effort)")"'
+    if [ "$(cfg '[.reviewers[] | select(.harness == "antigravity")] | length')" -gt 0 ]; then
+        echo "antigravity CLI: $(find_antigravity | grep . || echo "not found (set ANTIGRAVITY_CLI)")"
+    fi
     exit 0
 fi
 
@@ -123,10 +161,15 @@ run() { "${clean_env[@]}" ${timeout_cmd[@]+"${timeout_cmd[@]}"} "$@" </dev/null;
 # <name>.log and <name>.status ("ok <resume command>" or "failed <reason>").
 review_one() {
     local name="$1" harness="$2" model="$3" effort="$4"
-    local base="$out_dir/$name" log="$out_dir/$name.log" sid flags=()
+    local base="$out_dir/$name" log="$out_dir/$name.log" sid flags=() cli
 
     fail() { echo "failed $*" > "$base.status"; }
-    command -v "$harness" >/dev/null || { fail "$harness CLI not found on PATH"; return; }
+    if [ "$harness" = antigravity ]; then
+        cli="$(find_antigravity)"
+        [ -n "$cli" ] || { fail "Antigravity CLI not found (set ANTIGRAVITY_CLI, put agy on PATH, or install Antigravity in T3 Code)"; return; }
+    else
+        command -v "$harness" >/dev/null || { fail "$harness CLI not found on PATH"; return; }
+    fi
 
     case "$harness" in
         codex)
@@ -169,8 +212,35 @@ review_one() {
                 || { fail "triage turn exited $? (see $log)"; return; }
             echo "ok pi --session-id $sid" > "$base.status"
             ;;
+        antigravity)
+            # Full access: auto-approve every tool call (gh needs network). No self-update mid-run.
+            # --print takes the prompt as its value, so it is attached with '='.
+            flags=(--dangerously-skip-permissions --output-format json)
+            [ -n "$model" ] && flags+=(--model "$model")
+            [ -n "$effort" ] && flags+=(--effort "$effort")
+            agy_turn() { # <turn> <output base> <prompt> [args...]: one print-mode turn; writes <base>.json and <base>.md
+                local turn="$1" out="$2" prompt="$3"; shift 3
+                run env AGY_CLI_DISABLE_AUTO_UPDATE=1 "$cli" "${flags[@]}" "$@" --print="$prompt" > "$out.json" 2>> "$log"
+                local code=$?
+                # Not signed in: the CLI prints a sign-in link, waits 60s for a code, then fails.
+                if grep -q '^Authentication required' "$out.json" "$log" 2>/dev/null; then
+                    fail "Antigravity CLI is not signed in: run $cli once in a terminal and sign in"
+                    return 1
+                fi
+                if [ "$code" -ne 0 ] || ! jq -e '.status == "SUCCESS"' "$out.json" >/dev/null 2>&1; then
+                    fail "$turn turn failed (exit $code): $(jq -r '.error // empty' "$out.json" 2>/dev/null | head -n1) (see $out.json)"
+                    return 1
+                fi
+                jq -r '.response // empty' "$out.json" > "$out.md"
+            }
+            agy_turn review "$base.review" "$review_prompt" || return
+            sid="$(jq -r '.conversation_id // empty' "$base.review.json")"
+            [ -n "$sid" ] || { fail "no antigravity conversation id in $base.review.json"; return; }
+            agy_turn triage "$base.triage" "$triage_prompt" --conversation "$sid" || return
+            echo "ok $(printf '%q' "$cli") --conversation $sid" > "$base.status"
+            ;;
         *)
-            fail "unsupported harness '$harness' (use codex, claude or pi)"
+            fail "unsupported harness '$harness' (use codex, claude, pi or antigravity)"
             return
             ;;
     esac

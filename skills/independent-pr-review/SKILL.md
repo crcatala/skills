@@ -1,7 +1,7 @@
 ---
 name: independent-pr-review
-description: "Get an independent review of this branch's PR from one or more other agents (codex, claude or pi, run in parallel without a UI with a configured model and effort), then assess their triaged findings yourself: which are valid and worth addressing."
-compatibility: "Requires git, jq, the gh CLI (authenticated), and the CLI of each configured reviewer harness (codex, claude or pi). Reviewers run with full permissions and need network access."
+description: "Get an independent review of this branch's PR from one or more other agents (codex, claude, pi or Google's Antigravity CLI, run in parallel without a UI with a configured model and effort), then assess their triaged findings yourself: which are valid and worth addressing."
+compatibility: "Requires git, jq, the gh CLI (authenticated), and the CLI of each configured reviewer harness (codex, claude, pi or antigravity; the Antigravity CLI may be the copy T3 Code installs). Reviewers run with full permissions and need network access."
 disable-model-invocation: true
 argument-hint: "[all | reviewer,... | harness:model[:effort]] [focus notes]"
 ---
@@ -22,6 +22,14 @@ Check: `command -v git jq gh` plus the CLI for each reviewer harness (`codex`,
 `claude` or `pi`); `gh auth status` must pass. If something is missing, tell
 the user what to install and stop.
 
+The `antigravity` harness finds Google's Antigravity CLI itself, in this order:
+`ANTIGRAVITY_CLI` (a path), `agy` or `antigravity` on `PATH` (only if it is the
+CLI, not the Antigravity IDE launcher), then the copy T3 Code installs under
+`<T3 home>/tools/antigravity-acp/`, where T3 home is `T3CODE_HOME`, `~/.t3` or
+`${XDG_DATA_HOME:-~/.local/share}/t3`. `--list` shows the path it found. The
+CLI must be signed in: T3 Code keeps its Antigravity sign-in in its own profile,
+so run the CLI once in a terminal to sign in for it.
+
 ## Configuration
 
 `${XDG_CONFIG_HOME:-~/.config}/independent-pr-review/config.json`, or the path
@@ -33,13 +41,15 @@ available, and `codex-sol` runs by default:
 | `codex-sol` | codex | `gpt-6.2-sol` | medium |
 | `codex-astra` | codex | `gpt-6.2-astra` | medium |
 | `claude-fable` | claude | `claude-fable-5-2` | medium |
+| `antigravity-neon` | antigravity | `gemini-4-neon` | medium |
 
 A config file replaces the presets; copy the ones you want from
 `{baseDir}/config.example.json`. Its fields:
 
 - `reviewers`: named reviewers, each `{harness, model, effort}`. `model` and
   `effort` are optional and passed as-is to the harness (codex
-  `model_reasoning_effort`, claude `--effort`, pi `--thinking`).
+  `model_reasoning_effort`, claude `--effort`, pi `--thinking`, antigravity
+  `--effort`; `antigravity models` lists its models).
 - `default`: reviewer names used when none are requested. One is recommended.
 - `timeout_minutes`: limit per turn (default 30).
 - `keep_runs`: runs kept per branch; older ones are deleted after each run
@@ -57,7 +67,9 @@ elsewhere instead (as `<dir>/<repo>/<branch>/<timestamp>/`).
 1. **Pick reviewers from the invocation text.**
    - Nothing about reviewers: the configured default (no flag).
    - `all`, "all reviewers", "every reviewer": `--all`.
-   - Configured names: `--reviewers name1,name2`.
+   - Configured names: `--reviewers name1,name2`. A short name that matches the
+     end of exactly one configured name means that reviewer (`neon` is
+     `antigravity-neon`, `sol` is `codex-sol`).
    - Ad-hoc `harness:model[:effort]` (e.g. `codex:gpt-6.2-sol:high`): pass it
      in `--reviewers` too; it can be mixed with names.
    - A PR number or URL: `--pr <it>`. Otherwise the reviewer finds the PR for
