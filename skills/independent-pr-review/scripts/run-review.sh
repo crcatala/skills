@@ -58,6 +58,19 @@ fi
 
 cfg() { jq -r "$1" <<<"$config_json"; }
 
+# Runs a command with a time limit of $1 seconds (timeout, or gtimeout on macOS with coreutils;
+# without either, no limit). Exits 124 when the limit is hit.
+with_limit() {
+    local secs="$1"; shift
+    if command -v timeout >/dev/null; then timeout "$secs" "$@"
+    elif command -v gtimeout >/dev/null; then gtimeout "$secs" "$@"
+    else "$@"
+    fi
+}
+
+# Seconds the Antigravity CLI checks (--help, models) may take.
+agy_check_secs="${INDEPENDENT_PR_REVIEW_CHECK_TIMEOUT:-60}"
+
 # T3 Code's home directories to look in: $T3CODE_HOME, ~/.t3 (its default), ${XDG_DATA_HOME:-~/.local/share}/t3.
 t3_homes() { printf '%s\n' "${T3CODE_HOME:-}" "$HOME/.t3" "${XDG_DATA_HOME:-$HOME/.local/share}/t3" | grep .; }
 
@@ -65,14 +78,16 @@ t3_homes() { printf '%s\n' "${T3CODE_HOME:-}" "$HOME/.t3" "${XDG_DATA_HOME:-$HOM
 # (antigravity only when it is the CLI, not the Antigravity IDE's launcher); the release T3 Code
 # marks active in <T3 home>/tools/antigravity-acp/<platform>-<arch>/active.json.
 find_antigravity() {
-    local cand t3_home os arch exe release
+    local cand t3_home os arch exe release help
     if [ -n "${ANTIGRAVITY_CLI:-}" ]; then
         [ -x "$ANTIGRAVITY_CLI" ] && echo "$ANTIGRAVITY_CLI"
         return
     fi
     for cand in agy antigravity; do
         cand="$(command -v "$cand")" || continue
-        "$cand" --help 2>&1 | grep -q -- '--print' && { echo "$cand"; return; }
+        # Captured first: --help may exit non-zero, which pipefail would count against a pipe.
+        help="$(with_limit "$agy_check_secs" "$cand" --help </dev/null 2>&1)"
+        [[ "$help" == *--print* ]] && { echo "$cand"; return; }
     done
     case "$(uname -s)" in
         Linux) os=linux ;; Darwin) os=darwin ;; MINGW*|MSYS*|CYGWIN*) os=win32 ;; *) return ;;
@@ -103,15 +118,23 @@ t3_antigravity_signed_in() {
 # Checks the Antigravity CLI at $1 (empty: not found) can run reviews. Prints nothing when it can,
 # else one line telling the user what to do, and returns 1. `models` answers at once when signed out.
 antigravity_setup_problem() {
-    local cli="$1" t=() run_cmd out
+    local cli="$1" run_cmd out code
     if [ -z "$cli" ]; then
         echo "Antigravity CLI not found. Set up Antigravity in T3 Code, or install Google's standalone agy CLI, or set ANTIGRAVITY_CLI to the CLI's path."
         return 1
     fi
-    command -v timeout >/dev/null && t=(timeout 60)
-    out="$(AGY_CLI_DISABLE_AUTO_UPDATE=1 ${t[@]+"${t[@]}"} "$cli" models </dev/null 2>&1)"
-    [[ "$out" == *"Please sign in"* ]] || return 0
+    out="$(AGY_CLI_DISABLE_AUTO_UPDATE=1 with_limit "$agy_check_secs" "$cli" models </dev/null 2>&1)"
+    code=$?
     run_cmd="$(printf '%q' "$cli")"
+    if [[ "$out" != *"Please sign in"* ]]; then
+        [ "$code" -eq 0 ] && return 0
+        if [ "$code" -eq 124 ]; then
+            echo "Could not check the Antigravity CLI: $run_cmd models timed out after ${agy_check_secs}s. Check the network connection, then try again."
+        else
+            echo "Could not check the Antigravity CLI: $run_cmd models exited $code: $(grep -v '^Fetching' <<<"$out" | grep . | head -n1)"
+        fi
+        return 1
+    fi
     if t3_antigravity_signed_in; then
         echo "Antigravity CLI is not signed in. Being signed in to Antigravity in T3 Code does not count: T3 keeps that sign-in to itself, so the CLI needs its own, once per machine. Run $run_cmd in a terminal, open the Google link it shows, sign in, and paste the code back if asked."
     else

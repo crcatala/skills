@@ -12,7 +12,9 @@ separately unless they carry `metadata.version` for their own breaking changes.
   (`gemini-4-neon`, medium). The CLI is found through `ANTIGRAVITY_CLI`, `agy` or `antigravity` on `PATH`,
   or the copy T3 Code manages under `<T3 home>/tools/antigravity-acp/`. Before a run, the script checks the
   CLI is found and signed in, and otherwise fails that reviewer at once with what to do, including that a
-  T3 Code sign-in does not carry over to the CLI. `--list` shows the CLI's path and whether it is ready.
+  T3 Code sign-in does not carry over to the CLI. A check that fails or times out is reported as such.
+  `--list` shows the CLI's path and whether it is ready. `tests/test-independent-pr-review.sh` covers this
+  against a fake CLI.
 - `github-pr-screenshots`: uploads with the GitHub CLI's built-in `--attach` flag (gh 2.99.0+) instead of the
   `gh-attach` extension, which is no longer installed or used. Files go to GitHub's user-attachments storage, where
   the web editor's uploads go, instead of commits on `refs/uploads/issues/<n>` refs in the repository. The body file
